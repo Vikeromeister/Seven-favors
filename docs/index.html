@@ -1,29 +1,59 @@
 <!DOCTYPE html>
-<html lang="hu">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Hanamikoji</title>
+  <title>Seven Favors</title>
   <link rel="stylesheet" href="src/styles.css" />
 </head>
 <body>
   <div class="app-shell">
     <div id="mode-selection-screen" class="mode-selection-screen">
       <div class="mode-selection-card">
-        <h1>Játékmód választás</h1>
-        <p>Válaszd ki, hogy egyedül a számítógép ellen vagy két játékosként játszol.</p>
-        <div class="mode-buttons">
-          <button id="single-player-button" class="primary" type="button">Egyjátékos</button>
-          <button id="multiplayer-button" class="secondary" type="button">Kétjátékos</button>
+        <h1>Seven Favors</h1>
+        <p class="subtitle">A tactical duel of secret gifts, shrewd trades, and contested favor.</p>
+        
+        <div class="mode-group">
+          <h2>Single Player vs AI</h2>
+          <p class="mode-desc">Select AI difficulty:</p>
+          <div class="difficulty-buttons">
+            <button id="ai-casual-button" class="diff-button secondary" type="button" data-diff="easy">
+              <strong>Casual</strong>
+              <span>Easy / Relaxed</span>
+            </button>
+            <button id="ai-tactical-button" class="diff-button primary" type="button" data-diff="medium">
+              <strong>Tactical</strong>
+              <span>Medium / Balanced</span>
+            </button>
+            <button id="ai-master-button" class="diff-button secondary" type="button" data-diff="hard">
+              <strong>Master</strong>
+              <span>Hard / Minimax</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="mode-group">
+          <h2>Two Players</h2>
+          <p class="mode-desc">Local pass-and-play on one device with privacy screens:</p>
+          <button id="multiplayer-button" class="multi-button secondary" type="button">Pass &amp; Play</button>
         </div>
       </div>
     </div>
 
+    <header class="app-header">
+      <div class="game-info-bar">
+        <span id="game-mode-badge" class="badge">Single Player (Tactical)</span>
+        <span id="turn-badge" class="badge">Turn 1 / 8</span>
+        <span id="active-player-badge" class="badge active-badge">Player 1's Turn</span>
+      </div>
+    </header>
+
     <section id="opponent-hand" class="opponent-hand">
+      <div class="player-label" id="opponent-label">Opponent's Hand</div>
       <div id="opponent-hand-list" class="opponent-hand-list"></div>
     </section>
 
-    <section id="message" class="message-panel">Click an action to start.</section>
+    <section id="message" class="message-panel">Click an action button below to start your turn.</section>
 
     <section class="game-area">
       <div id="board-container" class="board-container"></div>
@@ -31,22 +61,39 @@
     </section>
 
     <section id="hand-panel" class="hand-panel">
+      <div class="player-label" id="hand-label">Your Hand</div>
       <div id="hand-list" class="hand-list"></div>
     </section>
 
     <section class="controls-panel">
-        <h2>Actions</h2>
-        <div class="action-buttons">
-          <button id="secret-button">1. Secret</button>
-          <button id="tradeoff-button">2. Tradeoff</button>
-          <button id="gift-button">3. Gift</button>
-          <button id="competition-button">4. Competition</button>
-        </div>
-        <div class="confirm-panel">
-          <button id="confirm-button" class="primary">Confirm</button>
-          <button id="restart-button" class="secondary">New Game</button>
-        </div>
-      </section>
+      <h2>Actions</h2>
+      <div class="action-buttons">
+        <button id="secret-button" type="button">
+          <span class="action-num">1</span>
+          <span class="action-title">Secret</span>
+          <span class="action-desc">Save 1 card</span>
+        </button>
+        <button id="tradeoff-button" type="button">
+          <span class="action-num">2</span>
+          <span class="action-title">Tradeoff</span>
+          <span class="action-desc">Discard 2 cards</span>
+        </button>
+        <button id="gift-button" type="button">
+          <span class="action-num">3</span>
+          <span class="action-title">Gift</span>
+          <span class="action-desc">Offer 3 (1 vs 2)</span>
+        </button>
+        <button id="competition-button" type="button">
+          <span class="action-num">4</span>
+          <span class="action-title">Competition</span>
+          <span class="action-desc">Offer 2 pairs</span>
+        </button>
+      </div>
+      <div class="confirm-panel">
+        <button id="confirm-button" class="primary" type="button">Confirm Selection</button>
+        <button id="restart-button" class="secondary" type="button">New Game</button>
+      </div>
+    </section>
 
     <section id="offer-panel" class="offer-panel hidden"></section>
 
@@ -54,11 +101,16 @@
 
     <div id="transition-screen" class="transition-screen hidden">
       <div class="transition-content">
-        <h1 id="transition-title">Player 1's turn</h1>
-        <p id="transition-text">After acknowledging, the upcoming player's hand will be visible. Please do not look at the screen.</p>
+        <h1 id="transition-title">Player 1's Turn</h1>
+        <p id="transition-text">Pass the device. Once confirmed, the active player's hand will be revealed.</p>
         <button id="transition-button" class="primary" type="button">Continue</button>
       </div>
     </div>
+
+    <footer class="app-footer">
+      <p><strong>Seven Favors</strong> &mdash; An unofficial, non-commercial open-source web game.</p>
+      <p class="disclaimer">Inspired by the core tabletop game mechanics designed by Kota Nakayama. <em>Hanamikoji</em> is a registered trademark of EmperorS4 and Taiwan Boardgame Design. All code and visual assets in this project are independent and created for non-commercial educational purposes.</p>
+    </footer>
   </div>
 
   <script type="module" src="src/main.js"></script>

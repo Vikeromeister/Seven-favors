@@ -1,0 +1,187 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import * as Game from '../docs/src/game.js';
+
+test('Game setup and initialization', () => {
+  Game.startGame();
+
+  assert.equal(Game.state.currentPlayer, 1);
+  assert.equal(Game.state.turnsTaken, 0);
+  assert.equal(Game.state.gameOver, false);
+  assert.equal(Game.state.winner, 0);
+
+  // Player 1 has 6 dealt + 1 drawn = 7 cards
+  assert.equal(Game.getHand(1).length, 7);
+  // Player 2 has 6 dealt = 6 cards
+  assert.equal(Game.getHand(2).length, 6);
+  // Deck: 21 - 12 dealt - 1 drawn = 8 cards remaining
+  assert.equal(Game.state.deck.length, 8);
+
+  // Actions available
+  for (const player of [1, 2]) {
+    assert.equal(Game.canUseAction(player, 'secret'), true);
+    assert.equal(Game.canUseAction(player, 'tradeoff'), true);
+    assert.equal(Game.canUseAction(player, 'gift'), true);
+    assert.equal(Game.canUseAction(player, 'competition'), true);
+  }
+
+  // 7 Geishas
+  const rows = Game.getGeishaRows();
+  assert.equal(rows.length, 7);
+  for (let i = 0; i < 7; i++) {
+    assert.equal(rows[i].id, i + 1);
+    assert.equal(rows[i].player1, 0);
+    assert.equal(rows[i].player2, 0);
+  }
+});
+
+test('Card definitions and deck counts match rules', () => {
+  const expectedValues = [0, 2, 2, 2, 3, 3, 4, 5];
+  for (let id = 1; id <= 7; id++) {
+    assert.equal(Game.cardValue(id), expectedValues[id]);
+    assert.ok(Game.cardName(id).length > 0);
+    assert.notEqual(Game.cardName(id), 'unknown');
+  }
+  assert.equal(Game.cardValue(0), 0);
+});
+
+test('Action: Secret sets aside card and advances turn', () => {
+  Game.startGame();
+  const initialHand = Game.getHand(1);
+  const cardToSecret = initialHand[0];
+
+  const success = Game.performSecret(1, 0);
+  assert.equal(success, true);
+  assert.equal(Game.canUseAction(1, 'secret'), false);
+  assert.equal(Game.state.secretCard[1], cardToSecret);
+  assert.equal(Game.getHand(1).length, 6);
+
+  // Turn advanced to Player 2, who drew 1 card (6 + 1 = 7)
+  assert.equal(Game.state.currentPlayer, 2);
+  assert.equal(Game.state.turnsTaken, 1);
+  assert.equal(Game.getHand(2).length, 7);
+
+  // Cannot perform secret twice
+  assert.equal(Game.performSecret(1, 0), false);
+  // Cannot perform with out of range index
+  assert.equal(Game.performSecret(2, 99), false);
+});
+
+test('Action: Tradeoff discards 2 cards and advances turn', () => {
+  Game.startGame();
+  // Valid tradeoff
+  const success = Game.performTradeoff(1, [0, 1]);
+  assert.equal(success, true);
+  assert.equal(Game.canUseAction(1, 'tradeoff'), false);
+  assert.equal(Game.getHand(1).length, 5);
+
+  assert.equal(Game.state.currentPlayer, 2);
+  assert.equal(Game.state.turnsTaken, 1);
+
+  // Rejects duplicate indices or invalid counts
+  assert.equal(Game.performTradeoff(2, [0, 0]), false);
+  assert.equal(Game.performTradeoff(2, [0]), false);
+  assert.equal(Game.performTradeoff(2, [0, 1, 2]), false);
+  assert.equal(Game.performTradeoff(2, [0, 99]), false);
+});
+
+test('Action: Gift distributes 1 card to opponent and 2 cards to active player', () => {
+  Game.startGame();
+  Game.state.players[1].hand = [7, 6, 5, 4, 3, 2, 1];
+
+  // Rejects invalid inputs without mutating hand
+  assert.equal(Game.performGift(1, [0, 1, 1], 0), false);
+  assert.equal(Game.getHand(1).length, 7);
+  assert.equal(Game.performGift(1, [0, 1, 2], 3), false); // chosenOfferIndex must be 0, 1, or 2
+  assert.equal(Game.getHand(1).length, 7);
+
+  // Player 1 offers cards at indices [0, 1, 2] -> values [7, 6, 5]
+  // Opponent picks index 1 (card 6)
+  const success = Game.performGift(1, [0, 1, 2], 1);
+  assert.equal(success, true);
+  assert.equal(Game.canUseAction(1, 'gift'), false);
+
+  // Opponent (player 2) should get card 6
+  assert.equal(Game.state.geishagifts[2][6], 1);
+  // Player 1 should get card 7 and card 5
+  assert.equal(Game.state.geishagifts[1][7], 1);
+  assert.equal(Game.state.geishagifts[1][5], 1);
+});
+
+test('Action: Competition distributes chosen pair to opponent and other pair to player', () => {
+  Game.startGame();
+  Game.state.players[1].hand = [7, 6, 5, 4, 3, 2, 1];
+
+  // Rejects duplicates or invalid pair selection
+  assert.equal(Game.performCompetition(1, [0, 1, 2, 2], 1), false);
+  assert.equal(Game.performCompetition(1, [0, 1, 2, 3], 3), false);
+
+  // Pair 1: indices [0, 1] -> [7, 6]; Pair 2: indices [2, 3] -> [5, 4]
+  // Opponent chooses Pair 1
+  const success = Game.performCompetition(1, [0, 1, 2, 3], 1);
+  assert.equal(success, true);
+  assert.equal(Game.canUseAction(1, 'competition'), false);
+
+  // Opponent (player 2) chose pair 1 -> cards [7, 6]
+  assert.equal(Game.state.geishagifts[2][7], 1);
+  assert.equal(Game.state.geishagifts[2][6], 1);
+  // Player 1 gets remaining pair 2 -> cards [5, 4]
+  assert.equal(Game.state.geishagifts[1][5], 1);
+  assert.equal(Game.state.geishagifts[1][4], 1);
+});
+
+test('Endgame rule: 11+ points takes precedence over 4 geishas', () => {
+  Game.startGame();
+  // Turn 1-6
+  Game.performSecret(1, 0);
+  Game.performSecret(2, 0);
+  Game.performTradeoff(1, [0, 1]);
+  Game.performTradeoff(2, [0, 1]);
+  Game.performGift(1, [0, 1, 2], 0);
+  Game.performGift(2, [0, 1, 2], 0);
+
+  // Force geisha gifts: Player 1 has four 2-3 pt geishas (IDs 1, 2, 3, 4 -> 9 pts)
+  // Player 2 has IDs 5, 6, 7 (3+4+5 = 12 pts)
+  Game.state.geishagifts[1] = [0, 2, 2, 2, 3, 0, 0, 0];
+  Game.state.geishagifts[2] = [0, 0, 0, 0, 0, 3, 4, 5];
+  Game.state.secretCard = [null, 1, 7]; // P1 gets +1 to ID 1, P2 gets +1 to ID 7
+
+  // Complete turn 7 and 8
+  Game.performCompetition(1, [0, 1, 2, 3], 1);
+  Game.performCompetition(2, [0, 1, 2, 3], 1);
+
+  assert.equal(Game.state.gameOver, true);
+  // Under official rules, Player 2 (with 12 pts >= 11) must win over Player 1 (with 4 geishas)
+  assert.equal(Game.state.winner, 2);
+});
+
+test('Full round: 8 turns triggers endgame scoring', () => {
+  Game.startGame();
+
+  // Turn 1 (P1): Secret
+  Game.performSecret(1, 0);
+  // Turn 2 (P2): Secret
+  Game.performSecret(2, 0);
+  // Turn 3 (P1): Tradeoff
+  Game.performTradeoff(1, [0, 1]);
+  // Turn 4 (P2): Tradeoff
+  Game.performTradeoff(2, [0, 1]);
+  // Turn 5 (P1): Gift
+  Game.performGift(1, [0, 1, 2], 0);
+  // Turn 6 (P2): Gift
+  Game.performGift(2, [0, 1, 2], 0);
+  // Turn 7 (P1): Competition
+  Game.performCompetition(1, [0, 1, 2, 3], 1);
+  // Turn 8 (P2): Competition
+  Game.performCompetition(2, [0, 1, 2, 3], 1);
+
+  assert.equal(Game.state.turnsTaken, 8);
+  assert.equal(Game.state.gameOver, true);
+  assert.ok([0, 1, 2].includes(Game.state.winner));
+
+  const summary = Game.getResultSummary();
+  assert.ok(typeof summary.player1.score === 'number');
+  assert.ok(typeof summary.player2.score === 'number');
+  assert.ok(typeof summary.player1.geishaCount === 'number');
+  assert.ok(typeof summary.player2.geishaCount === 'number');
+});

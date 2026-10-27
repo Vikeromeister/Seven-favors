@@ -1,53 +1,36 @@
 import * as Game from './game.js';
+import * as AI from './ai.js';
 
-const GEISHA_COLORS = {
-  1: 'geisha-1',
-  2: 'geisha-2',
-  3: 'geisha-3',
-  4: 'geisha-4',
-  5: 'geisha-5',
-  6: 'geisha-6',
-  7: 'geisha-7'
+const ASSET_BASE = 'assets/';
+
+const CARD_IMAGE_FILES = {
+  1: 'gift_burger_2pts.png',
+  2: 'gift_chips_2pts.png',
+  3: 'gift_spinner_2pts.png',
+  4: 'gift_cardigan_3pts.png',
+  5: 'gift_sunglasses_3pts.png',
+  6: 'gift_ticket_4pts.png',
+  7: 'gift_phone_5pts.png'
 };
 
-const COLOR_RGB = {
-  'geisha-1': 'rgb(231, 76, 60)',
-  'geisha-2': 'rgb(52, 152, 219)',
-  'geisha-3': 'rgb(46, 204, 113)',
-  'geisha-4': 'rgb(155, 89, 182)',
-  'geisha-5': 'rgb(230, 126, 34)',
-  'geisha-6': 'rgb(241, 196, 15)',
-  'geisha-7': 'rgb(233, 30, 99)'
+const GEISHA_IMAGE_FILES = {
+  1: 'woman_burger_2pts.png',
+  2: 'woman_chips_2pts.png',
+  3: 'woman_spinner_2pts.png',
+  4: 'woman_cardigan_3pts.png',
+  5: 'woman_sunglasses_3pts.png',
+  6: 'woman_ticket_4pts.png',
+  7: 'woman_phone_5pts.png'
 };
 
 const CARD_ICONS = {
-  1: '🪈',
-  2: '🪭',
-  3: '📜',
-  4: '☂️',
-  5: '🎸',
-  6: '🫖',
-  7: '💐'
-};
-
-const ASSET_BASE = 'assets/';
-const CARD_IMAGE_FILES = {
-  1: 'gift_burger_2pts.png',
-  2: 'gift_cardigan_3pts.png',
-  3: 'gift_chips_2pts.png',
-  4: 'gift_phone_5pts.png',
-  5: 'gift_spinner_2pts.png',
-  6: 'gift_sunglasses_3pts.png',
-  7: 'gift_ticket_4pts.png'
-};
-const GEISHA_IMAGE_FILES = {
-  1: 'woman_burger_2pts.png',
-  2: 'woman_cardigan_3pts.png',
-  3: 'woman_chips_2pts.png',
-  4: 'woman_phone_5pts.png',
-  5: 'woman_spinner_2pts.png',
-  6: 'woman_sunglasses_3pts.png',
-  7: 'woman_ticket_4pts.png'
+  1: '🍔',
+  2: '🍟',
+  3: '🪀',
+  4: '🧥',
+  5: '🕶️',
+  6: '🎟️',
+  7: '📱'
 };
 
 function getCardAssetPath(cardId) {
@@ -64,6 +47,11 @@ const elements = {
   deckContainer: document.getElementById('deck-container'),
   handList: document.getElementById('hand-list'),
   opponentHandList: document.getElementById('opponent-hand-list'),
+  handLabel: document.getElementById('hand-label'),
+  opponentLabel: document.getElementById('opponent-label'),
+  gameModeBadge: document.getElementById('game-mode-badge'),
+  turnBadge: document.getElementById('turn-badge'),
+  activePlayerBadge: document.getElementById('active-player-badge'),
   secretButton: document.getElementById('secret-button'),
   tradeoffButton: document.getElementById('tradeoff-button'),
   giftButton: document.getElementById('gift-button'),
@@ -77,21 +65,20 @@ const elements = {
   transitionText: document.getElementById('transition-text'),
   transitionButton: document.getElementById('transition-button'),
   modeSelectionScreen: document.getElementById('mode-selection-screen'),
-  singlePlayerButton: document.getElementById('single-player-button'),
+  aiCasualButton: document.getElementById('ai-casual-button'),
+  aiTacticalButton: document.getElementById('ai-tactical-button'),
+  aiMasterButton: document.getElementById('ai-master-button'),
   multiplayerButton: document.getElementById('multiplayer-button')
 };
 
 let pendingAction = null;
 let offerChoices = null;
 let transition = null;
-let gameMode = null;
+let gameMode = null; // 'single' | 'multi'
+let aiDifficulty = 'medium'; // 'easy' | 'medium' | 'hard'
 
 function updateStatus() {
   elements.message.textContent = Game.state.message;
-}
-
-function other(player) {
-  return player === 1 ? 2 : 1;
 }
 
 function isComputer(player) {
@@ -106,10 +93,8 @@ function showTransition(player) {
 
   transition = {
     player,
-    title: isComputer(player) ? 'Számítógép köre' : `Player ${player}'s turn`,
-    text: isComputer(player)
-      ? 'Kattints a folytatáshoz, a számítógép most választ.'
-      : 'After acknowledging, the upcoming player\'s hand will be visible. Please do not look at the screen.'
+    title: `Player ${player}'s Turn`,
+    text: `Pass the device to Player ${player}. Please look away while switching.`
   };
   render();
 }
@@ -119,25 +104,6 @@ function hideTransition() {
   render();
 }
 
-function shuffleArray(array) {
-  const result = [...array];
-  for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [result[i], result[j]] = [result[j], result[i]];
-  }
-  return result;
-}
-
-function chooseRandom(array) {
-  return array[Math.floor(Math.random() * array.length)];
-}
-
-function getRandomSelection(count, max) {
-  return shuffleArray(Array.from({ length: max }, (_, index) => index))
-    .slice(0, count)
-    .sort((a, b) => a - b);
-}
-
 function resolveAIChoice() {
   if (!offerChoices) {
     hideTransition();
@@ -145,23 +111,28 @@ function resolveAIChoice() {
   }
 
   const handler = offerChoices.handler;
-  const choiceIndex = Math.floor(Math.random() * offerChoices.options.length);
+  const choiceIndex = offerChoices.aiChoice !== undefined
+    ? offerChoices.aiChoice
+    : Math.floor(Math.random() * offerChoices.options.length);
+
   offerChoices = null;
   pendingAction = null;
   hideTransition();
   handler(choiceIndex);
 }
 
-function prepareAIGiftResponse(player, selectedIndex) {
+function prepareAIGiftResponse(player, selectedIndices) {
   const hand = Game.getHand(player);
-  const giftCards = selectedIndex.map((index) => hand[index]);
+  const giftCards = selectedIndices.map((i) => hand[i]);
 
   pendingAction = null;
   offerChoices = {
-    title: 'A számítógép ajándékot adott. Válassz egy kártyát.',
-    options: giftCards.map((card, index) => ({ label: `${index + 1}. ${Game.cardName(card)}` })),
+    title: 'Computer offered 3 cards as a Gift. Choose 1 card to take into your gifts:',
+    options: giftCards.map((card, idx) => ({
+      label: `${CARD_ICONS[card]} ${Game.cardName(card)} (${Game.cardValue(card)} pts)`
+    })),
     handler: (chosenOfferIndex) => {
-      Game.performGift(player, selectedIndex, chosenOfferIndex);
+      Game.performGift(player, selectedIndices, chosenOfferIndex);
       offerChoices = null;
       pendingAction = null;
       if (!Game.state.gameOver) {
@@ -176,25 +147,28 @@ function prepareAIGiftResponse(player, selectedIndex) {
     }
   };
 
-  Game.state.message = 'A számítógép felajánlott három kártyát. Válassz egyet.';
+  Game.state.message = 'The Computer offered 3 cards. Choose 1 card to take.';
   render();
 }
 
-function prepareAICompetitionResponse(player, selectedIndex) {
+function prepareAICompetitionResponse(player, selectedIndices) {
   const hand = Game.getHand(player);
-  const competitionCards = selectedIndex.map((index) => hand[index]);
-  const firstPair = competitionCards.slice(0, 2);
-  const secondPair = competitionCards.slice(2, 4);
+  const firstPair = [hand[selectedIndices[0]], hand[selectedIndices[1]]];
+  const secondPair = [hand[selectedIndices[2]], hand[selectedIndices[3]]];
 
   pendingAction = null;
   offerChoices = {
-    title: 'A számítógép két párt kínál. Válaszd ki, melyiket akarod.',
+    title: 'Computer partitioned 4 cards into 2 pairs. Choose 1 pair to take:',
     options: [
-      { label: `1. pár: ${Game.cardName(firstPair[0])}, ${Game.cardName(firstPair[1])}` },
-      { label: `2. pár: ${Game.cardName(secondPair[0])}, ${Game.cardName(secondPair[1])}` }
+      {
+        label: `Pair 1: ${CARD_ICONS[firstPair[0]]} ${Game.cardName(firstPair[0])} (${Game.cardValue(firstPair[0])}p) + ${CARD_ICONS[firstPair[1]]} ${Game.cardName(firstPair[1])} (${Game.cardValue(firstPair[1])}p)`
+      },
+      {
+        label: `Pair 2: ${CARD_ICONS[secondPair[0]]} ${Game.cardName(secondPair[0])} (${Game.cardValue(secondPair[0])}p) + ${CARD_ICONS[secondPair[1]]} ${Game.cardName(secondPair[1])} (${Game.cardValue(secondPair[1])}p)`
+      }
     ],
     handler: (chosenPairIndex) => {
-      Game.performCompetition(player, selectedIndex, chosenPairIndex + 1);
+      Game.performCompetition(player, selectedIndices, chosenPairIndex + 1);
       offerChoices = null;
       pendingAction = null;
       if (!Game.state.gameOver) {
@@ -209,7 +183,7 @@ function prepareAICompetitionResponse(player, selectedIndex) {
     }
   };
 
-  Game.state.message = 'A számítógép választott négy kártyát. Válaszd ki, melyik pár legyen a tiéd.';
+  Game.state.message = 'The Computer offered 2 pairs for Competition. Choose which pair to take.';
   render();
 }
 
@@ -219,33 +193,15 @@ function executeAITurn() {
   }
 
   const player = Game.state.currentPlayer;
-  const hand = Game.getHand(player);
-  const possibleActions = [];
+  const decision = AI.chooseAIAction(aiDifficulty, player, Game.state);
 
-  if (Game.canUseAction(player, 'secret') && hand.length >= 1) {
-    possibleActions.push('secret');
-  }
-  if (Game.canUseAction(player, 'tradeoff') && hand.length >= 2) {
-    possibleActions.push('tradeoff');
-  }
-  if (Game.canUseAction(player, 'gift') && hand.length >= 3) {
-    possibleActions.push('gift');
-  }
-  if (Game.canUseAction(player, 'competition') && hand.length >= 4) {
-    possibleActions.push('competition');
-  }
-
-  if (possibleActions.length === 0) {
-    Game.state.message = 'A számítógép nem tud mozdulni.';
+  if (!decision) {
+    Game.state.message = 'Computer has no available actions.';
     render();
     return;
   }
 
-  const action = chooseRandom(possibleActions);
-  const selected = getRandomSelection(
-    action === 'secret' ? 1 : action === 'tradeoff' ? 2 : action === 'gift' ? 3 : 4,
-    hand.length
-  );
+  const { action, selected } = decision;
 
   switch (action) {
     case 'secret':
@@ -271,7 +227,7 @@ function showModeSelection() {
   offerChoices = null;
   transition = null;
   elements.modeSelectionScreen.classList.remove('hidden');
-  Game.state.message = 'Válaszd ki a játékmódot.';
+  Game.state.message = 'Select game mode to begin.';
   render();
 }
 
@@ -279,17 +235,19 @@ function hideModeSelection() {
   elements.modeSelectionScreen.classList.add('hidden');
 }
 
-function startNewGame(mode) {
+function startNewGame(mode, difficulty = 'medium') {
   gameMode = mode;
+  aiDifficulty = difficulty;
   hideModeSelection();
   Game.startGame();
   pendingAction = null;
   offerChoices = null;
   transition = null;
 
+  const diffLabel = difficulty.charAt(0).toUpperCase() + difficulty.slice(1);
   Game.state.message = mode === 'single'
-    ? 'Egyjátékos mód. Te kezded.'
-    : 'Kétjátékos mód. Az első játékos kezd.';
+    ? `Single Player mode (${diffLabel} AI). You go first.`
+    : 'Two Player mode. Player 1 goes first.';
 
   render();
 }
@@ -323,14 +281,17 @@ function createGiftStack(count, rowId, playerLabel) {
     return stack;
   }
 
-  for (let i = 0; i < Math.min(count, 3); i++) {  // Show up to 3 cards
+  const displayCount = Math.min(count, 3);
+  for (let i = 0; i < displayCount; i++) {
     const giftCard = document.createElement('div');
     giftCard.className = 'gift-card';
     giftCard.setAttribute('data-card', rowId);
     giftCard.style.backgroundImage = `url('${getCardAssetPath(rowId)}')`;
-    giftCard.style.backgroundSize = 'cover';
+    giftCard.style.backgroundSize = 'contain';
     giftCard.style.backgroundPosition = 'center';
     giftCard.style.backgroundRepeat = 'no-repeat';
+    giftCard.style.top = `${i * 24}px`;
+    giftCard.style.zIndex = `${i + 1}`;
     stack.appendChild(giftCard);
   }
 
@@ -354,15 +315,21 @@ function buildBoard() {
   // Secret card area
   const secretDiv = document.createElement('div');
   secretDiv.className = 'secret-area';
-  const secretCard = Game.state.secretCard[Game.state.currentPlayer];
-  if (secretCard !== null) {
+  const currentSecret = Game.state.secretCard[Game.state.currentPlayer];
+  if (currentSecret !== null) {
     const cardDiv = document.createElement('div');
-    cardDiv.className = `secret-card card-back`;
+    cardDiv.className = 'secret-card card-back';
+    cardDiv.title = 'Your secret card (revealed at endgame)';
     const revealDiv = document.createElement('div');
     revealDiv.className = 'secret-reveal';
-    revealDiv.textContent = `${CARD_ICONS[secretCard]} ${Game.cardValue(secretCard)}`;
+    revealDiv.innerHTML = `<span>Secret</span><strong>${CARD_ICONS[currentSecret]} ${Game.cardName(currentSecret)} (${Game.cardValue(currentSecret)}p)</strong>`;
     cardDiv.appendChild(revealDiv);
     secretDiv.appendChild(cardDiv);
+  } else {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'secret-placeholder';
+    placeholder.textContent = 'No Secret';
+    secretDiv.appendChild(placeholder);
   }
   boardWrapper.appendChild(secretDiv);
 
@@ -373,29 +340,40 @@ function buildBoard() {
     const column = document.createElement('div');
     column.className = 'geisha-column';
 
+    // Player 2 gifts (top)
     const p2Gifts = createGiftStack(row.player2, row.id, 'player2');
+
+    // Central Geisha card
     const geishaDiv = document.createElement('div');
     geishaDiv.className = `geisha-card geisha-${row.id}`;
+
+    // Favor marker
+    const favorDiv = document.createElement('div');
+    favorDiv.className = `favor-marker favor-${row.owner === 1 ? 'p1' : row.owner === 2 ? 'p2' : 'neutral'}`;
+    if (row.owner === 1) {
+      favorDiv.textContent = '▼ Favors P1';
+    } else if (row.owner === 2) {
+      favorDiv.textContent = isComputer(2) ? '▲ Favors AI' : '▲ Favors P2';
+    } else {
+      favorDiv.textContent = '● Neutral';
+    }
 
     const geishaImage = document.createElement('div');
     geishaImage.className = 'geisha-image';
     geishaImage.style.backgroundImage = `url('${getGeishaAssetPath(row.id)}')`;
-    geishaImage.style.backgroundSize = 'cover';
+    geishaImage.style.backgroundSize = 'contain';
     geishaImage.style.backgroundPosition = 'center';
     geishaImage.style.backgroundRepeat = 'no-repeat';
 
-    const nameDiv = document.createElement('div');
-    nameDiv.className = 'geisha-name';
-    nameDiv.textContent = row.name;
+    const labelDiv = document.createElement('div');
+    labelDiv.className = 'geisha-label';
+    labelDiv.textContent = `${CARD_ICONS[row.id]} ${row.name} (${row.value} pts)`;
 
-    const valueDiv = document.createElement('div');
-    valueDiv.className = 'geisha-value';
-    valueDiv.textContent = `${row.value} pont`;
-
+    geishaDiv.appendChild(favorDiv);
     geishaDiv.appendChild(geishaImage);
-    geishaDiv.appendChild(nameDiv);
-    geishaDiv.appendChild(valueDiv);
+    geishaDiv.appendChild(labelDiv);
 
+    // Player 1 gifts (bottom)
     const p1Gifts = createGiftStack(row.player1, row.id, 'player1');
 
     column.appendChild(p2Gifts);
@@ -410,19 +388,25 @@ function buildBoard() {
 
 function buildDeck() {
   elements.deckContainer.innerHTML = '';
-  
+
+  const label = document.createElement('div');
+  label.className = 'deck-label';
+  label.textContent = 'Deck';
+
   const cardDiv = document.createElement('div');
   cardDiv.className = 'deck-card';
   cardDiv.textContent = Game.state.deck.length;
-  
+  cardDiv.title = `${Game.state.deck.length} card(s) remaining in deck`;
+
+  elements.deckContainer.appendChild(label);
   elements.deckContainer.appendChild(cardDiv);
 }
 
 function buildOpponentHand() {
-  const opponent = other(Game.state.currentPlayer);
+  const opponent = Game.other(Game.state.currentPlayer);
   const opponentHand = Game.getHand(opponent);
   elements.opponentHandList.innerHTML = '';
-  
+
   opponentHand.forEach(() => {
     const backDiv = document.createElement('div');
     backDiv.className = 'card-back';
@@ -433,24 +417,33 @@ function buildOpponentHand() {
 function buildHand() {
   const hand = Game.getHand(Game.state.currentPlayer);
   elements.handList.innerHTML = '';
-  
+
   hand.forEach((card, index) => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'card-button';
     button.setAttribute('data-card', card);
-    button.title = Game.cardName(card);
+    button.title = `${Game.cardName(card)} (${Game.cardValue(card)} pts)`;
     button.style.backgroundImage = `url('${getCardAssetPath(card)}')`;
-    button.style.backgroundSize = 'cover';
+    button.style.backgroundSize = 'contain';
     button.style.backgroundPosition = 'center';
     button.style.backgroundRepeat = 'no-repeat';
 
     button.disabled = !pendingAction || pendingAction.mode !== 'select';
-    
-    if (pendingAction && pendingAction.selected.indexOf(index) !== -1) {
+
+    const selectionIndex = pendingAction ? pendingAction.selected.indexOf(index) : -1;
+    if (selectionIndex !== -1) {
       button.classList.add('selected');
+
+      // If Competition action, display Pair 1 or Pair 2 badge
+      if (pendingAction.type === 'competition') {
+        const badge = document.createElement('span');
+        badge.className = `pair-badge ${selectionIndex < 2 ? 'pair-1' : 'pair-2'}`;
+        badge.textContent = selectionIndex < 2 ? 'Pair 1' : 'Pair 2';
+        button.appendChild(badge);
+      }
     }
-    
+
     button.addEventListener('click', () => handleCardClick(index));
     elements.handList.appendChild(button);
   });
@@ -459,11 +452,11 @@ function buildHand() {
 function buildOfferPanel() {
   elements.offerPanel.innerHTML = '';
   elements.offerPanel.classList.add('hidden');
-  
+
   if (!offerChoices || transition) {
     return;
   }
-  
+
   elements.offerPanel.classList.remove('hidden');
   const title = document.createElement('p');
   title.className = 'offer-title';
@@ -483,70 +476,123 @@ function buildOfferPanel() {
 function buildResultPanel() {
   elements.resultPanel.innerHTML = '';
   elements.resultPanel.classList.add('hidden');
-  
+
   if (!Game.state.gameOver) {
     return;
   }
-  
+
   elements.resultPanel.classList.remove('hidden');
   const result = Game.getResultSummary();
-  
+
   const heading = document.createElement('h2');
-  heading.textContent = 'Játék vége';
-  
+  heading.textContent = 'Game Over';
+
+  const p1SecretName = result.player1.secretCard ? `${CARD_ICONS[result.player1.secretCard]} ${Game.cardName(result.player1.secretCard)} (${Game.cardValue(result.player1.secretCard)} pts)` : 'None';
+  const p2SecretName = result.player2.secretCard ? `${CARD_ICONS[result.player2.secretCard]} ${Game.cardName(result.player2.secretCard)} (${Game.cardValue(result.player2.secretCard)} pts)` : 'None';
+
+  let winnerText = 'Tie game!';
+  if (result.winner === 1) {
+    winnerText = gameMode === 'single' ? '🏆 You won!' : '🏆 Player 1 wins!';
+  } else if (result.winner === 2) {
+    winnerText = gameMode === 'single' ? '🤖 Computer won!' : '🏆 Player 2 wins!';
+  }
+
+  const p2Name = isComputer(2) ? 'Computer' : 'Player 2';
+
   const details = document.createElement('div');
   details.className = 'result-details';
   details.innerHTML = `
-    <p><strong>1. játékos:</strong> ${result.player1.score} pont, ${result.player1.geishaCount} gésa</p>
-    <p><strong>2. játékos:</strong> ${result.player2.score} pont, ${result.player2.geishaCount} gésa</p>
-    <p><strong>Nyertes:</strong> ${result.winner === 0 ? 'Döntetlen!' : result.winner + '. játékos'}</p>
+    <div class="result-winner">${winnerText}</div>
+    <div class="result-stats">
+      <div class="result-col">
+        <h3>${gameMode === 'single' ? 'You' : 'Player 1'}</h3>
+        <p><strong>Charm Points:</strong> ${result.player1.score}</p>
+        <p><strong>Geishas Won:</strong> ${result.player1.geishaCount} / 7</p>
+        <p><strong>Revealed Secret:</strong> ${p1SecretName}</p>
+      </div>
+      <div class="result-col">
+        <h3>${p2Name}</h3>
+        <p><strong>Charm Points:</strong> ${result.player2.score}</p>
+        <p><strong>Geishas Won:</strong> ${result.player2.geishaCount} / 7</p>
+        <p><strong>Revealed Secret:</strong> ${p2SecretName}</p>
+      </div>
+    </div>
   `;
-  
+
+  const restartBtn = document.createElement('button');
+  restartBtn.className = 'primary restart-result-btn';
+  restartBtn.type = 'button';
+  restartBtn.textContent = 'Play Again';
+  restartBtn.addEventListener('click', () => showModeSelection());
+
   elements.resultPanel.appendChild(heading);
   elements.resultPanel.appendChild(details);
+  elements.resultPanel.appendChild(restartBtn);
 }
 
 function updateActionButtons() {
   const player = Game.state.currentPlayer;
-  const transitionActive = !!transition;
-  const responsePending = !!offerChoices;
+  const transitionActive = Boolean(transition);
+  const responsePending = Boolean(offerChoices);
   const isAITurn = gameMode === 'single' && Game.state.currentPlayer === 2 && !responsePending;
-  elements.secretButton.disabled = !Game.canUseAction(player, 'secret') || Game.state.gameOver || pendingAction || transitionActive || responsePending || isAITurn;
-  elements.tradeoffButton.disabled = !Game.canUseAction(player, 'tradeoff') || Game.state.gameOver || pendingAction || transitionActive || responsePending || isAITurn;
-  elements.giftButton.disabled = !Game.canUseAction(player, 'gift') || Game.state.gameOver || pendingAction || transitionActive || responsePending || isAITurn;
-  elements.competitionButton.disabled = !Game.canUseAction(player, 'competition') || Game.state.gameOver || pendingAction || transitionActive || responsePending || isAITurn;
+
+  elements.secretButton.disabled = !Game.canUseAction(player, 'secret') || Game.state.gameOver || Boolean(pendingAction) || transitionActive || responsePending || isAITurn;
+  elements.tradeoffButton.disabled = !Game.canUseAction(player, 'tradeoff') || Game.state.gameOver || Boolean(pendingAction) || transitionActive || responsePending || isAITurn;
+  elements.giftButton.disabled = !Game.canUseAction(player, 'gift') || Game.state.gameOver || Boolean(pendingAction) || transitionActive || responsePending || isAITurn;
+  elements.competitionButton.disabled = !Game.canUseAction(player, 'competition') || Game.state.gameOver || Boolean(pendingAction) || transitionActive || responsePending || isAITurn;
   elements.confirmButton.disabled = !pendingAction || pendingAction.mode !== 'select' || transitionActive || responsePending || isAITurn;
+}
+
+function updateInfoBadges() {
+  if (gameMode === 'single') {
+    const diff = aiDifficulty.charAt(0).toUpperCase() + aiDifficulty.slice(1);
+    elements.gameModeBadge.textContent = `Single Player (${diff})`;
+    elements.opponentLabel.textContent = `Computer (${diff} AI)`;
+    elements.handLabel.textContent = 'Your Hand';
+  } else {
+    elements.gameModeBadge.textContent = 'Pass & Play';
+    elements.opponentLabel.textContent = `Player ${Game.other(Game.state.currentPlayer)}'s Hand (Hidden)`;
+    elements.handLabel.textContent = `Player ${Game.state.currentPlayer}'s Hand`;
+  }
+
+  elements.turnBadge.textContent = `Turn ${Math.min(Game.state.turnsTaken + 1, 8)} / 8`;
+
+  if (gameMode === 'single') {
+    elements.activePlayerBadge.textContent = Game.state.currentPlayer === 1 ? 'Your Turn' : "Computer's Turn";
+  } else {
+    elements.activePlayerBadge.textContent = `Player ${Game.state.currentPlayer}'s Turn`;
+  }
 }
 
 function setPendingAction(actionType) {
   if (Game.state.gameOver) {
     return;
   }
-  
+
   let max = 1;
   let prompt = '';
-  
+
   switch (actionType) {
     case 'secret':
       max = 1;
-      prompt = 'Válassz egy kártyát titoknak.';
+      prompt = 'Select 1 card to set aside in secret (will score at the end of the round).';
       break;
     case 'tradeoff':
       max = 2;
-      prompt = 'Válassz két kártyát, amit eldobsz.';
+      prompt = 'Select 2 cards to permanently discard from the game (tradeoff).';
       break;
     case 'gift':
       max = 3;
-      prompt = 'Válassz három kártyát, amit felajánlasz.';
+      prompt = 'Select 3 cards to offer: your opponent picks 1 to keep, and you keep the other 2.';
       break;
     case 'competition':
       max = 4;
-      prompt = 'Válassz négy kártyát a versenyhez.';
+      prompt = 'Select 4 cards: the 1st & 2nd cards form Pair 1; the 3rd & 4th cards form Pair 2.';
       break;
     default:
       return;
   }
-  
+
   pendingAction = {
     mode: 'select',
     type: actionType,
@@ -554,7 +600,7 @@ function setPendingAction(actionType) {
     maxSelection: max,
     prompt
   };
-  
+
   Game.state.message = prompt;
   offerChoices = null;
   render();
@@ -564,14 +610,23 @@ function handleCardClick(index) {
   if (!pendingAction || pendingAction.mode !== 'select') {
     return;
   }
-  
+
   const existingIndex = pendingAction.selected.indexOf(index);
   if (existingIndex >= 0) {
     pendingAction.selected.splice(existingIndex, 1);
   } else if (pendingAction.selected.length < pendingAction.maxSelection) {
     pendingAction.selected.push(index);
   }
-  
+
+  // Update prompt with dynamic feedback for Competition pairing
+  if (pendingAction.type === 'competition') {
+    const hand = Game.getHand(Game.state.currentPlayer);
+    const sel = pendingAction.selected;
+    const p1Names = sel.slice(0, 2).map((i) => Game.cardName(hand[i])).join(', ') || '...';
+    const p2Names = sel.slice(2, 4).map((i) => Game.cardName(hand[i])).join(', ') || '...';
+    Game.state.message = `Pair 1: [${p1Names}] | Pair 2: [${p2Names}] (${sel.length}/4 selected)`;
+  }
+
   render();
 }
 
@@ -579,17 +634,19 @@ function confirmSelection() {
   if (!pendingAction || pendingAction.mode !== 'select') {
     return;
   }
-  
+
   const player = Game.state.currentPlayer;
-  const selected = [...pendingAction.selected].sort((a, b) => a - b);
-  
+  const selected = [...pendingAction.selected];
+
   if (selected.length !== pendingAction.maxSelection) {
-    Game.state.message = `Pontosan ${pendingAction.maxSelection} kártyát kell kiválasztanod.`;
+    Game.state.message = `Please select exactly ${pendingAction.maxSelection} card(s). Currently selected: ${selected.length}.`;
     render();
     return;
   }
-  
-  switch (pendingAction.type) {
+
+  const actionType = pendingAction.type;
+
+  switch (actionType) {
     case 'secret':
       Game.performSecret(player, selected[0]);
       pendingAction = null;
@@ -619,20 +676,43 @@ function confirmSelection() {
       prepareCompetitionResponse(player, selected);
       break;
   }
-  
+
   render();
 }
 
-function prepareGiftResponse(player, selectedIndex) {
+function prepareGiftResponse(player, selectedIndices) {
   const hand = Game.getHand(player);
-  const giftCards = selectedIndex.map((index) => hand[index]);
-  
+  const giftCards = selectedIndices.map((i) => hand[i]);
+
   pendingAction = null;
+
+  if (gameMode === 'single' && player === 1) {
+    // Computer responds to human's Gift offer
+    const aiChoice = AI.chooseAIGiftResponse(aiDifficulty, 2, Game.state, giftCards);
+    const chosenCard = giftCards[aiChoice];
+    Game.performGift(player, selectedIndices, aiChoice);
+    Game.state.message = `You offered 3 gifts. Computer took ${CARD_ICONS[chosenCard]} ${Game.cardName(chosenCard)}. You kept the other 2.`;
+    pendingAction = null;
+    offerChoices = null;
+
+    if (!Game.state.gameOver) {
+      if (Game.state.currentPlayer === 2) {
+        executeAITurn();
+      }
+    } else {
+      render();
+    }
+    return;
+  }
+
+  // Multiplayer mode: opponent chooses 1 card
   offerChoices = {
-    title: 'The opponent should choose one of the offered cards.',
-    options: giftCards.map((card, index) => ({ label: `${index + 1}. ${Game.cardName(card)}` })),
+    title: `Player ${player} offered 3 cards. Player ${Game.other(player)}, choose 1 card to take:`,
+    options: giftCards.map((card) => ({
+      label: `${CARD_ICONS[card]} ${Game.cardName(card)} (${Game.cardValue(card)} pts)`
+    })),
     handler: (chosenOfferIndex) => {
-      Game.performGift(player, selectedIndex, chosenOfferIndex);
+      Game.performGift(player, selectedIndices, chosenOfferIndex);
       offerChoices = null;
       pendingAction = null;
       if (!Game.state.gameOver) {
@@ -642,30 +722,49 @@ function prepareGiftResponse(player, selectedIndex) {
       }
     }
   };
-  
-  Game.state.message = 'The opponent is choosing from the offered cards.';
-  if (gameMode === 'single') {
-    resolveAIChoice();
-  } else {
-    showTransition(other(player));
-  }
+
+  Game.state.message = `Player ${Game.other(player)} is choosing from the offered cards.`;
+  showTransition(Game.other(player));
 }
 
-function prepareCompetitionResponse(player, selectedIndex) {
+function prepareCompetitionResponse(player, selectedIndices) {
   const hand = Game.getHand(player);
-  const competitionCards = selectedIndex.map((index) => hand[index]);
-  const firstPair = competitionCards.slice(0, 2);
-  const secondPair = competitionCards.slice(2, 4);
-  
+  const firstPair = [hand[selectedIndices[0]], hand[selectedIndices[1]]];
+  const secondPair = [hand[selectedIndices[2]], hand[selectedIndices[3]]];
+
   pendingAction = null;
+
+  if (gameMode === 'single' && player === 1) {
+    // Computer responds to human's Competition split
+    const aiChoice = AI.chooseAICompetitionResponse(aiDifficulty, 2, Game.state, firstPair, secondPair);
+    Game.performCompetition(player, selectedIndices, aiChoice);
+    Game.state.message = `You offered 2 pairs. Computer chose Pair ${aiChoice}. You kept the remaining pair.`;
+    pendingAction = null;
+    offerChoices = null;
+
+    if (!Game.state.gameOver) {
+      if (Game.state.currentPlayer === 2) {
+        executeAITurn();
+      }
+    } else {
+      render();
+    }
+    return;
+  }
+
+  // Multiplayer mode: opponent chooses Pair 1 or Pair 2
   offerChoices = {
-    title: 'The opponent should choose which pair they want to take.',
+    title: `Player ${player} offered 2 pairs. Player ${Game.other(player)}, choose 1 pair to take:`,
     options: [
-      { label: `1. pair: ${Game.cardName(firstPair[0])}, ${Game.cardName(firstPair[1])}` },
-      { label: `2. pair: ${Game.cardName(secondPair[0])}, ${Game.cardName(secondPair[1])}` }
+      {
+        label: `Pair 1: ${CARD_ICONS[firstPair[0]]} ${Game.cardName(firstPair[0])} (${Game.cardValue(firstPair[0])}p) + ${CARD_ICONS[firstPair[1]]} ${Game.cardName(firstPair[1])} (${Game.cardValue(firstPair[1])}p)`
+      },
+      {
+        label: `Pair 2: ${CARD_ICONS[secondPair[0]]} ${Game.cardName(secondPair[0])} (${Game.cardValue(secondPair[0])}p) + ${CARD_ICONS[secondPair[1]]} ${Game.cardName(secondPair[1])} (${Game.cardValue(secondPair[1])}p)`
+      }
     ],
     handler: (chosenPairIndex) => {
-      Game.performCompetition(player, selectedIndex, chosenPairIndex + 1);
+      Game.performCompetition(player, selectedIndices, chosenPairIndex + 1);
       offerChoices = null;
       pendingAction = null;
       if (!Game.state.gameOver) {
@@ -675,16 +774,13 @@ function prepareCompetitionResponse(player, selectedIndex) {
       }
     }
   };
-  
-  Game.state.message = 'The opponent is choosing between the pairs.';
-  if (gameMode === 'single') {
-    resolveAIChoice();
-  } else {
-    showTransition(other(player));
-  }
+
+  Game.state.message = `Player ${Game.other(player)} is choosing between the two pairs.`;
+  showTransition(Game.other(player));
 }
 
 function render() {
+  updateInfoBadges();
   updateStatus();
   buildOpponentHand();
   buildBoard();
@@ -708,15 +804,17 @@ function restartGame() {
     showModeSelection();
     return;
   }
-
-  startNewGame(gameMode);
+  startNewGame(gameMode, aiDifficulty);
 }
 
 export function startApp() {
   showModeSelection();
 
-  elements.singlePlayerButton.addEventListener('click', () => startNewGame('single'));
+  elements.aiCasualButton.addEventListener('click', () => startNewGame('single', 'easy'));
+  elements.aiTacticalButton.addEventListener('click', () => startNewGame('single', 'medium'));
+  elements.aiMasterButton.addEventListener('click', () => startNewGame('single', 'hard'));
   elements.multiplayerButton.addEventListener('click', () => startNewGame('multi'));
+
   elements.secretButton.addEventListener('click', () => setPendingAction('secret'));
   elements.tradeoffButton.addEventListener('click', () => setPendingAction('tradeoff'));
   elements.giftButton.addEventListener('click', () => setPendingAction('gift'));

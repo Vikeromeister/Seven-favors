@@ -1,12 +1,12 @@
 const CARD_NAMES = [
   '',
-  'furulya 2',
-  'legyező 2',
-  'tekercs 2',
-  'ernyő 3',
-  'dibár 3',
-  'tea 4',
-  'virág 5'
+  'Burger',
+  'Chips',
+  'Fidget Spinner',
+  'Cardigan',
+  'Sunglasses',
+  'Concert Ticket',
+  'Smartphone'
 ];
 const CARD_VALUES = [0, 2, 2, 2, 3, 3, 4, 5];
 const INITIAL_DECK = [1, 1, 2, 2, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7, 7];
@@ -54,7 +54,7 @@ function shuffle(array) {
   return result;
 }
 
-function other(player) {
+export function other(player) {
   return player === 1 ? 2 : 1;
 }
 
@@ -63,7 +63,7 @@ function sortHand(hand) {
 }
 
 export function cardName(code) {
-  return CARD_NAMES[code] || 'ismeretlen';
+  return CARD_NAMES[code] || 'unknown';
 }
 
 export function cardValue(code) {
@@ -88,7 +88,7 @@ export function resetGame() {
   state.geishaCount = [0, 0, 0];
   state.gameOver = false;
   state.winner = 0;
-  state.message = 'A játék elkezdődött. Az első játékos körrel kezd.';
+  state.message = 'The game has started. Player 1 goes first.';
 }
 
 export function startGame() {
@@ -110,7 +110,24 @@ export function getHand(player) {
 }
 
 export function canUseAction(player, action) {
-  return state.players[player].actions[action] && !state.gameOver;
+  return Boolean(state.players[player]?.actions[action]) && !state.gameOver;
+}
+
+function areValidUniqueIndices(indices, maxLen, expectedCount) {
+  if (!Array.isArray(indices) || indices.length !== expectedCount) {
+    return false;
+  }
+  const set = new Set();
+  for (const idx of indices) {
+    if (typeof idx !== 'number' || !Number.isInteger(idx) || idx < 0 || idx >= maxLen) {
+      return false;
+    }
+    if (set.has(idx)) {
+      return false;
+    }
+    set.add(idx);
+  }
+  return true;
 }
 
 function removeCardsFromHand(hand, indexes) {
@@ -135,39 +152,39 @@ function advanceTurn() {
 }
 
 export function performSecret(player, cardIndex) {
-  const hand = state.players[player].hand;
-  if (!state.players[player].actions.secret || cardIndex < 0 || cardIndex >= hand.length) {
+  const hand = state.players[player]?.hand;
+  if (!hand || !state.players[player].actions.secret || cardIndex < 0 || cardIndex >= hand.length) {
     return false;
   }
   const card = hand.splice(cardIndex, 1)[0];
   state.secretCard[player] = card;
   state.players[player].actions.secret = false;
-  state.message = `A ${CARD_NAMES[card]} kártya titokként félretenve.`;
+  state.message = `Player ${player} set aside a secret card.`;
   advanceTurn();
   return true;
 }
 
 export function performTradeoff(player, cardIndexes) {
-  const hand = state.players[player].hand;
-  if (!state.players[player].actions.tradeoff || cardIndexes.length !== 2) {
+  const hand = state.players[player]?.hand;
+  if (!hand || !state.players[player].actions.tradeoff || !areValidUniqueIndices(cardIndexes, hand.length, 2)) {
     return false;
   }
   removeCardsFromHand(hand, cardIndexes);
   state.players[player].actions.tradeoff = false;
-  state.message = 'A kompromisszum megtörtént. Két kártyát eldobtál.';
+  state.message = `Player ${player} completed tradeoff (2 cards discarded).`;
   advanceTurn();
   return true;
 }
 
 export function performGift(player, cardIndexes, chosenOfferIndex) {
-  const hand = state.players[player].hand;
-  if (!state.players[player].actions.gift || cardIndexes.length !== 3) {
+  const hand = state.players[player]?.hand;
+  if (!hand || !state.players[player].actions.gift || !areValidUniqueIndices(cardIndexes, hand.length, 3)) {
+    return false;
+  }
+  if (typeof chosenOfferIndex !== 'number' || chosenOfferIndex < 0 || chosenOfferIndex >= 3) {
     return false;
   }
   const selected = removeCardsFromHand(hand, cardIndexes);
-  if (chosenOfferIndex < 0 || chosenOfferIndex >= selected.length) {
-    return false;
-  }
   const opponent = other(player);
   for (let i = 0; i < selected.length; i++) {
     if (i === chosenOfferIndex) {
@@ -177,25 +194,27 @@ export function performGift(player, cardIndexes, chosenOfferIndex) {
     }
   }
   state.players[player].actions.gift = false;
-  state.message = 'Ajándék akció végrehajtva.';
+  state.message = `Player ${player} completed gift action.`;
   advanceTurn();
   return true;
 }
 
 export function performCompetition(player, cardIndexes, chosenPair) {
-  const hand = state.players[player].hand;
-  if (!state.players[player].actions.competition || cardIndexes.length !== 4) {
+  const hand = state.players[player]?.hand;
+  if (!hand || !state.players[player].actions.competition || !areValidUniqueIndices(cardIndexes, hand.length, 4)) {
     return false;
   }
-  const selected = removeCardsFromHand(hand, cardIndexes);
   if (chosenPair !== 1 && chosenPair !== 2) {
     return false;
   }
+  const firstPair = [hand[cardIndexes[0]], hand[cardIndexes[1]]];
+  const secondPair = [hand[cardIndexes[2]], hand[cardIndexes[3]]];
+  removeCardsFromHand(hand, cardIndexes);
+
   const opponent = other(player);
-  const firstPair = [selected[0], selected[1]];
-  const secondPair = [selected[2], selected[3]];
   const playerPair = chosenPair === 2 ? firstPair : secondPair;
   const opponentPair = chosenPair === 2 ? secondPair : firstPair;
+
   for (const card of playerPair) {
     state.geishagifts[player][card] += 1;
   }
@@ -203,12 +222,12 @@ export function performCompetition(player, cardIndexes, chosenPair) {
     state.geishagifts[opponent][card] += 1;
   }
   state.players[player].actions.competition = false;
-  state.message = 'Versenyzés befejezve. Az ellenfél választása érvényesült.';
+  state.message = `Player ${player} completed competition. Opponent chose pair ${chosenPair}.`;
   advanceTurn();
   return true;
 }
 
-function computeEndgame() {
+export function computeEndgame() {
   if (state.secretCard[1] !== null) {
     state.geishagifts[1][state.secretCard[1]] += 1;
   }
@@ -229,9 +248,22 @@ function computeEndgame() {
       state.geishaCount[2] += 1;
     }
   }
-  if (state.geishaCount[1] > 3 || state.scores[1] > 10) {
+
+  const p1Points = state.scores[1] >= 11;
+  const p2Points = state.scores[2] >= 11;
+  const p1Geishas = state.geishaCount[1] >= 4;
+  const p2Geishas = state.geishaCount[2] >= 4;
+
+  // Official Hanamikoji rule:
+  // If one player wins 11+ points and the other wins 4+ geishas,
+  // the player with 11+ charm points wins!
+  if (p1Points && !p2Points) {
     state.winner = 1;
-  } else if (state.geishaCount[2] > 3 || state.scores[2] > 10) {
+  } else if (p2Points && !p1Points) {
+    state.winner = 2;
+  } else if (p1Geishas && !p2Geishas) {
+    state.winner = 1;
+  } else if (p2Geishas && !p1Geishas) {
     state.winner = 2;
   } else if (state.scores[1] > state.scores[2]) {
     state.winner = 1;
@@ -246,9 +278,9 @@ function finishGame() {
   computeEndgame();
   state.gameOver = true;
   if (state.winner === 0) {
-    state.message = 'Döntetlen!';
+    state.message = 'Tie game!';
   } else {
-    state.message = `A játék véget ért. A nyertes: ${state.winner}. játékos.`;
+    state.message = `Game over! Player ${state.winner} wins.`;
   }
 }
 
@@ -270,11 +302,13 @@ export function getResultSummary() {
   return {
     player1: {
       score: state.scores[1],
-      geishaCount: state.geishaCount[1]
+      geishaCount: state.geishaCount[1],
+      secretCard: state.secretCard[1]
     },
     player2: {
       score: state.scores[2],
-      geishaCount: state.geishaCount[2]
+      geishaCount: state.geishaCount[2],
+      secretCard: state.secretCard[2]
     },
     winner: state.winner
   };
