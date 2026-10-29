@@ -1,8 +1,8 @@
 # Seven Favors
 
-A browser-based, two-player card game of secret gift distribution and tactical area control, built with vanilla HTML5, CSS3, and modern ES Modules (zero external runtime dependencies).
+A browser-based single-player card game of secret gift distribution and tactical area control, built with vanilla HTML5, CSS3, and modern ES Modules (zero external runtime dependencies).
 
-Play online or locally against an AI engine featuring **3 difficulty levels** (Casual, Tactical, Master), or challenge a friend in **Local Pass & Play** mode with private hand transitions.
+Compete online or locally against an AI engine featuring **3 difficulty levels** (Casual, Tactical, and Master) on an animated, viewport-fitted tabletop stage.
 
 ---
 
@@ -13,9 +13,9 @@ Play online or locally against an AI engine featuring **3 difficulty levels** (C
   - **Casual (Easy):** Relaxed, semi-random play for casual games.
   - **Tactical (Medium):** Value-weighted decision making that evaluates contested characters, discards dead cards, and balances offers.
   - **Master (Hard):** Card counting, minimax partition for Competition, maximin evaluation for Gift offers, and strategic win-condition / threat mitigation.
-- **Pass & Play Multiplayer:** Local two-player mode with privacy transition screens so players cannot see each other's hands on a shared device.
-- **Visual Competition Pairing:** Interactive, real-time Pair 1 and Pair 2 badges so you have complete control over how cards are offered in competition.
-- **Live Favor Markers:** Real-time visual favor badges (`▲ Favors AI/P2`, `● Neutral`, `▼ Favors P1`) on every character column.
+- **Viewport-Scaled Tabletop Stage:** Fixed 1760×900 presentation scaled smoothly to fit any viewport with zero scrolling, custom card artwork, hover-to-peek secret slots, and icon actions with tooltips.
+- **Animated Card Flights & History Rail:** Web Animations API 3D card flights and flips for every draw, secret, discard, offer, and endgame reveal, paired with a colour-coded move history rail (blue = You, red = Computer).
+- **Visual Competition Pairing:** Real-time `1` and `2` pair badges on selected hand cards so you control exact competition splits.
 - **Automated Test Suite:** Built-in unit and simulation tests using Node.js's native test runner (`node:test`).
 
 ---
@@ -59,6 +59,14 @@ python3 -m http.server 8000 --directory docs
 ```
 
 Open `http://localhost:8000` (or the port output by your server) in any modern browser.
+
+### Regenerating Card Artwork
+
+Card and character images in `docs/assets/` are sliced from the reference sheets in `art/` via a dev-only Python/Pillow script:
+
+```bash
+python3 tools/slice_cards.py
+```
 
 ---
 

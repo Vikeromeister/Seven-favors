@@ -4,7 +4,7 @@ This file provides guidance for AI coding agents working in the **Seven Favors**
 
 ## Project Overview
 
-**Seven Favors** is a browser-based implementation of the two-player card game mechanic inspired by Kota Nakayama's design, built with vanilla HTML, CSS, and ES Modules (no bundler or external runtime dependencies). It supports both single-player (vs. AI with 3 distinct difficulty modes) and local pass-and-play multiplayer modes with privacy transitions.
+**Seven Favors** is a browser-based single-player implementation of the two-player card game mechanic inspired by Kota Nakayama's design, built with vanilla HTML, CSS, and ES Modules (no bundler or external runtime dependencies). Players compete against an AI engine with 3 distinct difficulty modes on a fixed 1760×900 scaled stage with Web Animations API card flights and a colour-coded move history rail.
 
 The live application lives entirely under `docs/` for direct GitHub Pages deployment.
 
@@ -16,13 +16,16 @@ The live application lives entirely under `docs/` for direct GitHub Pages deploy
 .
 ├── package.json                # Project root manifest (type: module, test & start scripts)
 ├── README.md                   # Project overview, rules, running guide, and legal disclaimer
+├── art/                        # Reference artwork sprite sheets (cards1.png, cards2.png)
+├── tools/
+│   └── slice_cards.py          # Dev-only Pillow script to slice art/ sheets into docs/assets/*.png
 ├── tests/                      # Automated unit and simulation test suite (Node built-in test runner)
 │   ├── game.test.js            # Rules, card deck, action validation & scoring tests
 │   ├── ai.test.js              # AI decision-making & response tests across 3 difficulties
 │   └── simulation.test.js      # Headless multi-game AI vs AI simulation runs
 ├── docs/                       # Static web application root (GitHub Pages root)
-│   ├── index.html              # Entry HTML page (lang="en")
-│   ├── assets/                 # Modern card & character PNG artwork
+│   ├── index.html              # Entry HTML page (lang="en"): stage, SVG sprite, fx layer
+│   ├── assets/                 # Sliced card & character PNG artwork
 │   │   ├── background_card.png
 │   │   ├── gift_*_Xpts.png     # Item/gift card images (IDs 1..7)
 │   │   └── woman_*_Xpts.png    # Character images (IDs 1..7)
@@ -30,8 +33,9 @@ The live application lives entirely under `docs/` for direct GitHub Pages deploy
 │       ├── main.js             # Entry point: boots the UI on DOMContentLoaded
 │       ├── game.js             # Pure game state, rules, turn progression, and scoring
 │       ├── ai.js               # Multi-difficulty AI engine (Casual, Tactical, Master)
-│       ├── ui.js               # DOM rendering, event listeners, pairing preview, and transitions
-│       └── styles.css          # Layout, theming, card sizing, favor badges, and responsive rules
+│       ├── fx.js               # DOM-only Web Animations API helpers (card flights & flips)
+│       ├── ui.js               # Single-player UI rendering, async turn sequencing & history rail
+│       └── styles.css          # 1760×900 scaled stage layout, theming, tooltips, and animations
 ```
 
 ---
@@ -50,6 +54,14 @@ npx serve docs
 python3 -m http.server 8000 --directory docs
 ```
 
+### Regenerating Card Artwork
+
+If reference sheets in `art/` change, slice them into `docs/assets/` using Pillow:
+
+```bash
+python3 tools/slice_cards.py
+```
+
 ### Running Tests
 
 Automated tests use Node.js's built-in test runner (`node:test`) with zero external dependencies:
@@ -64,7 +76,7 @@ npm test
 
 1. **`docs/src/game.js` (State & Rules Engine)**
    - Exports `state`, `resetGame`, `startGame`, `drawCard`, `performSecret`, `performTradeoff`, `performGift`, `performCompetition`, `getGeishaRows`, and `getResultSummary`.
-   - **1-Based Indexing Convention:** Players are indexed `1` and `2`, and Character/Card types are indexed `1` through `7`. Index `0` in arrays is unused padding.
+   - **1-Based Indexing Convention:** Players are indexed `1` (Human) and `2` (AI), and Character/Card types are indexed `1` through `7`. Index `0` in arrays is unused padding.
    - **Card & Deck Definitions:**
      - ID 1: Burger (Value: 2, 2 cards in deck)
      - ID 2: Chips (Value: 2, 2 cards in deck)
@@ -91,22 +103,26 @@ npm test
      - `medium` (Tactical): Evaluates card utility based on contested characters, discards dead cards with Tradeoff, keeps decisive cards with Secret, and balances pairs.
      - `hard` (Master): Card counting, minimax partition for Competition, maximin evaluation for Gift offers, and win condition / threat evaluation.
 
-3. **`docs/src/ui.js` (Presentation, Interaction & Transitions)**
-   - Manages UI state (`pendingAction`, `offerChoices`, `transition`, `gameMode`, `aiDifficulty`) and re-renders via `render()`.
-   - Competition UI displays explicit `Pair 1` and `Pair 2` tags directly on cards in hand during selection.
-   - Character columns display dynamic visual favor markers (`▲ Favors AI / P2`, `● Neutral`, `▼ Favors P1`).
-   - Handles pass-and-play privacy transitions and game over result breakdown.
+3. **`docs/src/fx.js` (Animation Helpers)**
+   - DOM-only presentation helpers used by `ui.js` (`flyCard`, `wait`, `rectOf`, `clearFx`, `motion`).
+   - Animates 3D card flights and flips in `#fx-layer` (outside `#stage` so `position: fixed` viewport coordinates are unaffected by stage transforms) while respecting `prefers-reduced-motion`.
 
-4. **`docs/src/styles.css` (Styling & Layout)**
-   - Flexible responsive layout without overflow clipping.
-   - CSS variables for theme colors and character accents.
+4. **`docs/src/ui.js` (Presentation, Interaction & Turn Sequencing)**
+   - Single-player presentation layer managing UI state (`aiDifficulty`, `pendingAction`, `pendingOffer`, `history`, `animating`, `hiddenDraw`, `revealDone`, `resultReady`, `gameToken`, `currentScale`) and re-rendering via `render()`.
+   - Scales the fixed `1760×900` `#stage` via `--stage-scale` (`fitStage()`) so the interface fills the viewport without scrolling.
+   - Renders a left-hand move history rail colour-coded by actor (**blue** = player, **red** = computer), newest move on top, with hover popouts showing card destinations.
+   - Competition selection displays `1` and `2` pair badges on selected cards; endgame reveal animates secret cards onto stacks and shows `▼ You` / `▲ AI` favor markers and the result summary.
+
+5. **`docs/src/styles.css` (Styling & Layout)**
+   - Fixed-stage `1760×900` grid layout scaled by `--stage-scale`, zero page scrolling (`overflow: hidden`).
+   - CSS variables for theme colors, player/AI accents (`--player-color`, `--ai-color`), card aspect ratio (`--card-ar`), and component heights.
 
 ---
 
 ## Key Conventions & Gotchas
 
-- **Keep `game.js` and `ai.js` DOM-Free:** Zero DOM or window dependencies. All game rule mutations happen in `game.js`; all tactical evaluations happen in `ai.js`; DOM updates stay in `ui.js`.
+- **Keep `game.js` and `ai.js` DOM-Free:** Zero DOM or window dependencies. All game rule mutations happen in `game.js`; all tactical evaluations happen in `ai.js`; DOM updates and animations stay in `ui.js` and `fx.js`.
 - **Strict Input Validation:** All player action functions validate unique indices and bounds before mutating hand or state.
 - **Card ID to Asset Alignment:** IDs `1..7` align with values `[2, 2, 2, 3, 3, 4, 5]` and their corresponding `gift_*_Xpts.png` and `woman_*_Xpts.png` filenames.
-- **Language:** All UI text, prompts, and status messages are standardized in English.
+- **Language:** All UI text, tooltips, and labels are standardized in English.
 - **Attribution & Trademark:** When referencing the inspiration, cite Kota Nakayama and acknowledge EmperorS4 / Taiwan Boardgame Design's trademark rights.

@@ -7,15 +7,72 @@
   <link rel="stylesheet" href="src/styles.css" />
 </head>
 <body>
-  <div class="app-shell">
-    <div id="mode-selection-screen" class="mode-selection-screen">
-      <div class="mode-selection-card">
-        <h1>Seven Favors</h1>
-        <p class="subtitle">A tactical duel of secret gifts, shrewd trades, and contested favor.</p>
-        
-        <div class="mode-group">
-          <h2>Single Player vs AI</h2>
-          <p class="mode-desc">Select AI difficulty:</p>
+  <div class="viewport">
+    <div id="stage" class="stage">
+      <aside class="history-rail" aria-label="Move history">
+        <ol id="history-list" class="history-list"></ol>
+      </aside>
+
+      <main class="table">
+        <header class="top-bar">
+          <span id="turn-badge" class="badge">Turn 1 / 8</span>
+          <span id="difficulty-badge" class="badge">Tactical AI</span>
+          <button id="restart-button" class="icon-btn" type="button" data-tip="New game" aria-label="New game">
+            <svg class="icon" aria-hidden="true"><use href="#icon-restart"/></svg>
+          </button>
+        </header>
+
+        <section id="opponent-zone" class="zone zone-opponent">
+          <div id="opponent-secret" class="secret-slot" data-tip="Computer's secret"></div>
+          <div id="opponent-hand-list" class="hand-row backs"></div>
+          <div id="opponent-actions" class="mini-actions" aria-label="Computer actions remaining"></div>
+        </section>
+
+        <section id="board-row" class="board-row">
+          <div id="board-container" class="board"></div>
+          <div class="pile-column">
+            <div id="deck-pile" class="pile" data-tip="Deck"></div>
+            <div id="discard-pile" class="pile" data-tip="Discard pile"></div>
+          </div>
+          <div id="offer-tray" class="offer-tray hidden"></div>
+        </section>
+
+        <section id="player-zone" class="zone zone-player">
+          <div id="player-secret" class="secret-slot own" data-tip="Your secret (hover to peek)"></div>
+          <div id="hand-list" class="hand-row"></div>
+          <div id="action-bar" class="action-bar">
+            <button class="action-btn" type="button" data-action="secret" aria-label="Secret"
+              data-tip="Secret: hide 1 card face down. It scores for you at the end of the round.">
+              <svg class="icon" aria-hidden="true"><use href="#icon-secret"/></svg><span class="pips" data-n="1"></span>
+            </button>
+            <button class="action-btn" type="button" data-action="tradeoff" aria-label="Tradeoff"
+              data-tip="Tradeoff: discard 2 cards face down. They are out of the round.">
+              <svg class="icon" aria-hidden="true"><use href="#icon-tradeoff"/></svg><span class="pips" data-n="2"></span>
+            </button>
+            <button class="action-btn" type="button" data-action="gift" aria-label="Gift"
+              data-tip="Gift: offer 3 cards face up. The opponent takes 1, you keep the other 2.">
+              <svg class="icon" aria-hidden="true"><use href="#icon-gift"/></svg><span class="pips" data-n="3"></span>
+            </button>
+            <button class="action-btn" type="button" data-action="competition" aria-label="Competition"
+              data-tip="Competition: offer 4 cards as 2 face-up pairs (1st+2nd, 3rd+4th). The opponent takes a pair, you keep the other.">
+              <svg class="icon" aria-hidden="true"><use href="#icon-competition"/></svg><span class="pips" data-n="4"></span>
+            </button>
+            <button id="confirm-button" class="confirm-btn" type="button" aria-label="Confirm selection" data-tip="Confirm selection">
+              <svg class="icon" aria-hidden="true"><use href="#icon-confirm"/></svg>
+            </button>
+          </div>
+        </section>
+
+        <footer class="stage-footer">Seven Favors: an unofficial, non-commercial fan game inspired by Kota Nakayama's design. <em>Hanamikoji</em> is a registered trademark of EmperorS4 and Taiwan Boardgame Design.</footer>
+      </main>
+
+      <section id="result-panel" class="result-panel hidden"></section>
+
+      <div id="mode-selection-screen" class="mode-selection-screen">
+        <div class="mode-selection-card">
+          <h1>Seven Favors</h1>
+          <p class="subtitle">A tactical duel of secret gifts, shrewd trades, and contested favor.</p>
+          <p class="mode-desc">Choose your opponent:</p>
           <div class="difficulty-buttons">
             <button id="ai-casual-button" class="diff-button secondary" type="button" data-diff="easy">
               <strong>Casual</strong>
@@ -30,89 +87,28 @@
               <span>Hard / Minimax</span>
             </button>
           </div>
-        </div>
-
-        <div class="mode-group">
-          <h2>Two Players</h2>
-          <p class="mode-desc">Local pass-and-play on one device with privacy screens:</p>
-          <button id="multiplayer-button" class="multi-button secondary" type="button">Pass &amp; Play</button>
+          <p class="disclaimer">Inspired by the core tabletop game mechanics designed by Kota Nakayama. <em>Hanamikoji</em> is a registered trademark of EmperorS4 and Taiwan Boardgame Design. All code and visual assets in this project are independent and created for non-commercial educational purposes.</p>
         </div>
       </div>
     </div>
-
-    <header class="app-header">
-      <div class="game-info-bar">
-        <span id="game-mode-badge" class="badge">Single Player (Tactical)</span>
-        <span id="turn-badge" class="badge">Turn 1 / 8</span>
-        <span id="active-player-badge" class="badge active-badge">Player 1's Turn</span>
-      </div>
-    </header>
-
-    <section id="opponent-hand" class="opponent-hand">
-      <div class="player-label" id="opponent-label">Opponent's Hand</div>
-      <div id="opponent-hand-list" class="opponent-hand-list"></div>
-    </section>
-
-    <section id="message" class="message-panel">Click an action button below to start your turn.</section>
-
-    <section class="game-area">
-      <div id="board-container" class="board-container"></div>
-      <div id="deck-container" class="deck-container"></div>
-    </section>
-
-    <section id="hand-panel" class="hand-panel">
-      <div class="player-label" id="hand-label">Your Hand</div>
-      <div id="hand-list" class="hand-list"></div>
-    </section>
-
-    <section class="controls-panel">
-      <h2>Actions</h2>
-      <div class="action-buttons">
-        <button id="secret-button" type="button">
-          <span class="action-num">1</span>
-          <span class="action-title">Secret</span>
-          <span class="action-desc">Save 1 card</span>
-        </button>
-        <button id="tradeoff-button" type="button">
-          <span class="action-num">2</span>
-          <span class="action-title">Tradeoff</span>
-          <span class="action-desc">Discard 2 cards</span>
-        </button>
-        <button id="gift-button" type="button">
-          <span class="action-num">3</span>
-          <span class="action-title">Gift</span>
-          <span class="action-desc">Offer 3 (1 vs 2)</span>
-        </button>
-        <button id="competition-button" type="button">
-          <span class="action-num">4</span>
-          <span class="action-title">Competition</span>
-          <span class="action-desc">Offer 2 pairs</span>
-        </button>
-      </div>
-      <div class="confirm-panel">
-        <button id="confirm-button" class="primary" type="button">Confirm Selection</button>
-        <button id="restart-button" class="secondary" type="button">New Game</button>
-      </div>
-    </section>
-
-    <section id="offer-panel" class="offer-panel hidden"></section>
-
-    <section id="result-panel" class="result-panel hidden"></section>
-
-    <div id="transition-screen" class="transition-screen hidden">
-      <div class="transition-content">
-        <h1 id="transition-title">Player 1's Turn</h1>
-        <p id="transition-text">Pass the device. Once confirmed, the active player's hand will be revealed.</p>
-        <button id="transition-button" class="primary" type="button">Continue</button>
-      </div>
-    </div>
-
-    <footer class="app-footer">
-      <p><strong>Seven Favors</strong> &mdash; An unofficial, non-commercial open-source web game.</p>
-      <p class="disclaimer">Inspired by the core tabletop game mechanics designed by Kota Nakayama. <em>Hanamikoji</em> is a registered trademark of EmperorS4 and Taiwan Boardgame Design. All code and visual assets in this project are independent and created for non-commercial educational purposes.</p>
-    </footer>
   </div>
 
+  <div id="fx-layer" class="fx-layer" aria-hidden="true"></div>
+
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="icon-secret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="5" y="2.5" width="14" height="19" rx="2"/><rect x="8.5" y="11" width="7" height="5.5" rx="1"/><path d="M10 11V9a2 2 0 0 1 4 0v2"/></symbol>
+      <symbol id="icon-tradeoff" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2.5" y="6" width="10" height="14" rx="1.5"/><rect x="10" y="3" width="10" height="14" rx="1.5"/><path d="M13 7.5l4 4M17 7.5l-4 4"/></symbol>
+      <symbol id="icon-gift" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="8" width="18" height="4" rx="1"/><path d="M5 12v8h14v-8M12 8v12"/><path d="M12 8C10 4 6 4 6 6.5S9 8 12 8zM12 8c2-4 6-4 6-1.5S15 8 12 8z"/></symbol>
+      <symbol id="icon-competition" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3v17M7 20h10M4 7h16"/><path d="M4 7l-2.5 6a2.5 2.5 0 0 0 5 0zM20 7l-2.5 6a2.5 2.5 0 0 0 5 0z"/></symbol>
+      <symbol id="icon-confirm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></symbol>
+      <symbol id="icon-restart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></symbol>
+    </defs>
+  </svg>
   <script type="module" src="src/main.js"></script>
 </body>
 </html>
