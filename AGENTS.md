@@ -75,7 +75,7 @@ npm test
 ## Architecture & Module Responsibilities
 
 1. **`docs/src/game.js` (State & Rules Engine)**
-   - Exports `state`, `resetGame`, `startGame`, `drawCard`, `performSecret`, `performTradeoff`, `performGift`, `performCompetition`, `getGeishaRows`, and `getResultSummary`.
+   - Exports `state`, `resetGame`, `startGame`, `startNextRound`, `drawCard`, `performSecret`, `performTradeoff`, `performGift`, `performCompetition`, `getGeishaRows`, and `getResultSummary`.
    - **1-Based Indexing Convention:** Players are indexed `1` (Human) and `2` (AI), and Character/Card types are indexed `1` through `7`. Index `0` in arrays is unused padding.
    - **Card & Deck Definitions:**
      - ID 1: Burger (Value: 2, 2 cards in deck)
@@ -96,22 +96,25 @@ npm test
      - **Precedence Rule:** If one player achieves 11+ Charm Points and the other achieves 4+ Characters, the player with 11+ Charm Points wins.
      - Otherwise, achieving 4+ Characters wins.
      - If neither reaches the threshold, tiebreaker falls back to highest charm points or tie (`0`).
+     - **Multi-Round Tie Continuation:** If a round ends in a tie (`winner === 0`), `state.geishalove` is preserved. `startNextRound()` resets the deck, hands, and actions while keeping character favor states and alternating the starting player (`roundStarter`). Additional rounds continue until a player wins.
 
 2. **`docs/src/ai.js` (Artificial Intelligence Engine)**
    - Pure, DOM-free AI decision engine supporting 3 difficulties:
      - `easy` (Casual): Random action selection, simple greedy response to offers.
      - `medium` (Tactical): Evaluates card utility based on contested characters, discards dead cards with Tradeoff, keeps decisive cards with Secret, and balances pairs.
      - `hard` (Master): Card counting, minimax partition for Competition, maximin evaluation for Gift offers, and win condition / threat evaluation.
+   - Takes preserved `state.geishalove` into account during Round 2+ heuristic and minimax evaluations.
 
 3. **`docs/src/fx.js` (Animation Helpers)**
    - DOM-only presentation helpers used by `ui.js` (`flyCard`, `wait`, `rectOf`, `clearFx`, `motion`).
    - Animates 3D card flights and flips in `#fx-layer` (outside `#stage` so `position: fixed` viewport coordinates are unaffected by stage transforms) while respecting `prefers-reduced-motion`.
 
 4. **`docs/src/ui.js` (Presentation, Interaction & Turn Sequencing)**
-   - Single-player presentation layer managing UI state (`aiDifficulty`, `pendingAction`, `pendingOffer`, `history`, `animating`, `hiddenDraw`, `revealDone`, `resultReady`, `gameToken`, `currentScale`) and re-rendering via `render()`.
+   - Single-player presentation layer managing UI state (`aiDifficulty`, `pendingAction`, `pendingOffer`, `history`, `animating`, `hiddenDraw`, `revealDone`, `resultReady`, `gameToken`, `currentScale`, `gameStarted`) and re-rendering via `render()`.
    - Scales the fixed `1760×900` `#stage` via `--stage-scale` (`fitStage()`) so the interface fills the viewport without scrolling.
    - Renders a left-hand move history rail colour-coded by actor (**blue** = player, **red** = computer), newest move on top, with hover popouts showing card destinations.
    - Competition selection displays `1` and `2` pair badges on selected cards; endgame reveal animates secret cards onto stacks and shows `▼ You` / `▲ AI` favor markers and the result summary.
+   - **Round Continuation & Confirmation:** Tie rounds display a "Start Round N" approval button on the result panel (does not offer a fresh restart). Clicking the New Game button at any point during an ongoing match displays an in-stage confirmation modal asking if the user is sure.
 
 5. **`docs/src/styles.css` (Styling & Layout)**
    - Fixed-stage `1760×900` grid layout scaled by `--stage-scale`, zero page scrolling (`overflow: hidden`).

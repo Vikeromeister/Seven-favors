@@ -72,7 +72,10 @@ const els = {
   modeSelectionScreen: document.getElementById('mode-selection-screen'),
   aiCasualButton: document.getElementById('ai-casual-button'),
   aiTacticalButton: document.getElementById('ai-tactical-button'),
-  aiMasterButton: document.getElementById('ai-master-button')
+  roundBadge: document.getElementById('round-badge'),
+  confirmModal: document.getElementById('confirm-modal'),
+  confirmCancelButton: document.getElementById('confirm-cancel-button'),
+  confirmAcceptButton: document.getElementById('confirm-accept-button')
 };
 
 let aiDifficulty = 'medium';
@@ -87,6 +90,22 @@ let revealDone = false;     // game over: false until the secret-reveal animatio
 let resultReady = false;    // result panel is visible
 let gameToken = 0;          // bumped on new game; async sequences abort when it changes
 let currentScale = 1;
+let gameStarted = false;    // true from startNewGame() until a winner's result panel is shown or game is ended
+
+/* --- Modal Helpers --- */
+
+function isConfirmModalOpen() {
+  return !els.confirmModal.classList.contains('hidden');
+}
+
+function openConfirmModal() {
+  els.confirmModal.classList.remove('hidden');
+  els.confirmCancelButton.focus();
+}
+
+function closeConfirmModal() {
+  els.confirmModal.classList.add('hidden');
+}
 
 /* --- Helpers --- */
 
@@ -155,6 +174,7 @@ function fitStage() {
 /* --- Render --- */
 
 function updateTopBar() {
+  els.roundBadge.textContent = `Round ${Game.state.round}`;
   els.turnBadge.textContent = `Turn ${Math.min(Game.state.turnsTaken + 1, 8)} / 8`;
   els.difficultyBadge.textContent = `${DIFF_LABELS[aiDifficulty]} AI`;
   els.playerZone.classList.toggle('active', !Game.state.gameOver && Game.state.currentPlayer === HUMAN);
@@ -231,10 +251,11 @@ function buildBoard() {
     geisha.className = 'geisha-card';
     geisha.style.backgroundImage = `url('${geishaFront(row.id)}')`;
 
-    if (Game.state.gameOver && revealDone && row.owner !== 0) {
+    const displayedOwner = Game.state.gameOver && !revealDone ? row.priorOwner : row.owner;
+    if (displayedOwner !== 0) {
       const marker = document.createElement('div');
-      marker.className = `favor-marker ${row.owner === HUMAN ? 'favor-p1' : 'favor-p2'}`;
-      marker.textContent = row.owner === HUMAN ? '▼ You' : '▲ AI';
+      marker.className = `favor-marker ${displayedOwner === HUMAN ? 'favor-p1' : 'favor-p2'}`;
+      marker.textContent = displayedOwner === HUMAN ? '▼ You' : '▲ AI';
       geisha.appendChild(marker);
     }
 
@@ -431,6 +452,7 @@ function buildResultPanel() {
 
   els.resultPanel.classList.remove('hidden');
   const result = Game.getResultSummary();
+  const isTie = result.winner === 0;
 
   const p1SecretName = result.player1.secretCard
     ? `${CARD_ICONS[result.player1.secretCard]} ${Game.cardName(result.player1.secretCard)} (${Game.cardValue(result.player1.secretCard)} pts)`
@@ -439,7 +461,11 @@ function buildResultPanel() {
     ? `${CARD_ICONS[result.player2.secretCard]} ${Game.cardName(result.player2.secretCard)} (${Game.cardValue(result.player2.secretCard)} pts)`
     : 'None';
 
-  let winnerText = 'Tie game!';
+  const headingText = isTie
+    ? `Round ${result.round} Tied`
+    : (result.round > 1 ? `Game Over · Round ${result.round}` : 'Game Over');
+
+  let winnerText = '🤝 Tie round! Geisha favors carry over.';
   if (result.winner === HUMAN) {
     winnerText = '🏆 You won!';
   } else if (result.winner === AI_PLAYER) {
@@ -449,31 +475,36 @@ function buildResultPanel() {
   const card = document.createElement('div');
   card.className = 'result-card';
   card.innerHTML = `
-    <h2>Game Over</h2>
+    <h2>${headingText}</h2>
     <div class="result-winner">${winnerText}</div>
     <div class="result-stats">
       <div class="result-col">
         <h3>You</h3>
         <p><strong>Charm Points:</strong> ${result.player1.score}</p>
-        <p><strong>Geishas Won:</strong> ${result.player1.geishaCount} / 7</p>
+        <p><strong>Geishas Held:</strong> ${result.player1.geishaCount} / 7</p>
         <p><strong>Revealed Secret:</strong> ${p1SecretName}</p>
       </div>
       <div class="result-col">
         <h3>Computer</h3>
         <p><strong>Charm Points:</strong> ${result.player2.score}</p>
-        <p><strong>Geishas Won:</strong> ${result.player2.geishaCount} / 7</p>
+        <p><strong>Geishas Held:</strong> ${result.player2.geishaCount} / 7</p>
         <p><strong>Revealed Secret:</strong> ${p2SecretName}</p>
       </div>
     </div>
   `;
 
-  const restartBtn = document.createElement('button');
-  restartBtn.className = 'primary restart-result-btn';
-  restartBtn.type = 'button';
-  restartBtn.textContent = 'Play Again';
-  restartBtn.addEventListener('click', () => showModeSelection());
+  const actionBtn = document.createElement('button');
+  actionBtn.className = 'primary restart-result-btn';
+  actionBtn.type = 'button';
+  if (isTie) {
+    actionBtn.textContent = `Start Round ${result.round + 1}`;
+    actionBtn.addEventListener('click', () => beginNextRound());
+  } else {
+    actionBtn.textContent = 'Play Again';
+    actionBtn.addEventListener('click', () => showModeSelection());
+  }
 
-  card.appendChild(restartBtn);
+  card.appendChild(actionBtn);
   els.resultPanel.replaceChildren(card);
 }
 
@@ -980,6 +1011,9 @@ async function afterCommit(prevNext, token) {
     if (token !== gameToken) return;
     resultReady = true;
     animating = false;
+    if (Game.state.winner !== 0) {
+      gameStarted = false;
+    }
     render();
     return;
   }
@@ -1065,19 +1099,60 @@ function resetUIState() {
 }
 
 function showModeSelection() {
+  gameStarted = false;
+  closeConfirmModal();
   resetUIState();
+  Game.resetGame();
   els.modeSelectionScreen.classList.remove('hidden');
   renderHistory(false);
   render();
 }
 
 function startNewGame(difficulty) {
+  closeConfirmModal();
   resetUIState();
+  gameStarted = true;
   aiDifficulty = difficulty;
   els.modeSelectionScreen.classList.add('hidden');
   Game.startGame();
   renderHistory(false);
   render();
+}
+
+async function beginNextRound() {
+  if (!Game.state.gameOver || Game.state.winner !== 0) return;
+  closeConfirmModal();
+  resetUIState();
+  gameStarted = true;
+  Game.startNextRound();
+  renderHistory(false);
+
+  if (Game.state.currentPlayer === AI_PLAYER) {
+    animating = true;
+    render();
+    const token = gameToken;
+    try {
+      await Fx.wait(500);
+      if (token !== gameToken) return;
+      await playAITurn(token);
+    } catch (err) {
+      console.error(err);
+      Fx.clearFx();
+      pendingOffer = null;
+      animating = false;
+      render();
+    }
+  } else {
+    render();
+  }
+}
+
+function handleRestartClick() {
+  if (gameStarted) {
+    openConfirmModal();
+  } else {
+    showModeSelection();
+  }
 }
 
 export function startApp() {
@@ -1088,7 +1163,13 @@ export function startApp() {
   els.aiCasualButton.addEventListener('click', () => startNewGame('easy'));
   els.aiTacticalButton.addEventListener('click', () => startNewGame('medium'));
   els.aiMasterButton.addEventListener('click', () => startNewGame('hard'));
-  els.restartButton.addEventListener('click', () => startNewGame(aiDifficulty));
+  els.restartButton.addEventListener('click', handleRestartClick);
+
+  els.confirmCancelButton.addEventListener('click', closeConfirmModal);
+  els.confirmAcceptButton.addEventListener('click', () => showModeSelection());
+  els.confirmModal.addEventListener('click', (e) => {
+    if (e.target === els.confirmModal) closeConfirmModal();
+  });
 
   els.actionBar.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-action]');
@@ -1119,6 +1200,13 @@ export function startApp() {
   });
 
   document.addEventListener('keydown', (e) => {
+    if (isConfirmModalOpen()) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeConfirmModal();
+      }
+      return;
+    }
     if (!els.modeSelectionScreen.classList.contains('hidden')) return;
     if (e.key === 'Escape') {
       if (pendingAction && !animating && !pendingOffer) {

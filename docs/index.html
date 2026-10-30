@@ -15,6 +15,7 @@
 
       <main class="table">
         <header class="top-bar">
+          <span id="round-badge" class="badge">Round 1</span>
           <span id="turn-badge" class="badge">Turn 1 / 8</span>
           <span id="difficulty-badge" class="badge">Tactical AI</span>
           <button id="restart-button" class="icon-btn" type="button" data-tip="New game" aria-label="New game">
@@ -88,6 +89,17 @@
             </button>
           </div>
           <p class="disclaimer">Inspired by the core tabletop game mechanics designed by Kota Nakayama. <em>Hanamikoji</em> is a registered trademark of EmperorS4 and Taiwan Boardgame Design. All code and visual assets in this project are independent and created for non-commercial educational purposes.</p>
+        </div>
+      </div>
+
+      <div id="confirm-modal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+        <div class="confirm-modal-card">
+          <h2 id="confirm-modal-title">End Current Game?</h2>
+          <p class="confirm-modal-desc">Starting a new game will end the current game. Are you sure?</p>
+          <div class="confirm-modal-actions">
+            <button id="confirm-cancel-button" class="modal-btn secondary" type="button">Cancel</button>
+            <button id="confirm-accept-button" class="modal-btn danger" type="button">Yes, New Game</button>
+          </div>
         </div>
       </div>
     </div>

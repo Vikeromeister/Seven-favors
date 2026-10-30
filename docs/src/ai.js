@@ -44,12 +44,14 @@ function evaluateCardUtility(player, state) {
     const val = cardValue(g); // also equals total copies in game
     const myGifts = state.geishagifts[player][g];
     const oppGifts = state.geishagifts[opp][g];
-    const neededToWin = Math.floor(val / 2) + 1;
+    const currentOwner = state.geishalove?.[g] ?? 0;
+    const neededToWin = currentOwner === player ? Math.ceil(val / 2) : Math.floor(val / 2) + 1;
+    const neededForOpp = currentOwner === opp ? Math.ceil(val / 2) : Math.floor(val / 2) + 1;
 
     // If already secured by AI
     if (myGifts >= neededToWin) {
       utilities[g] = 0; // extra copies don't change control
-    } else if (oppGifts >= neededToWin) {
+    } else if (oppGifts >= neededForOpp) {
       // Already lost to opponent
       utilities[g] = 0;
     } else {
@@ -60,7 +62,7 @@ function evaluateCardUtility(player, state) {
       if (myGifts + 1 >= neededToWin) {
         weight += val * 3; // decisive card!
       }
-      if (margin < 0) {
+      if (margin < 0 || (margin === 0 && currentOwner === opp)) {
         weight += val; // defensive block
       }
       utilities[g] = weight;
@@ -73,7 +75,7 @@ function evaluateCardUtility(player, state) {
 /**
  * Heuristic score of a board state for a player
  */
-function scoreBoardState(player, giftsP1, giftsP2, secretP1, secretP2) {
+function scoreBoardState(player, giftsP1, giftsP2, secretP1, secretP2, geishaLove = null) {
   const opp = other(player);
   const myGifts = player === 1 ? giftsP1 : giftsP2;
   const oppGifts = player === 1 ? giftsP2 : giftsP1;
@@ -88,10 +90,19 @@ function scoreBoardState(player, giftsP1, giftsP2, secretP1, secretP2) {
     const myCount = myGifts[g] + (player === 1 && secretP1 === g ? 1 : (player === 2 && secretP2 === g ? 1 : 0));
     const oppCount = oppGifts[g] + (opp === 1 && secretP1 === g ? 1 : (opp === 2 && secretP2 === g ? 1 : 0));
 
+    let owner = 0;
     if (myCount > oppCount) {
+      owner = player;
+    } else if (oppCount > myCount) {
+      owner = opp;
+    } else if (geishaLove) {
+      owner = geishaLove[g] || 0;
+    }
+
+    if (owner === player) {
       myScore += val;
       myGeishas += 1;
-    } else if (oppCount > myCount) {
+    } else if (owner === opp) {
       oppScore += val;
       oppGeishas += 1;
     }
@@ -236,7 +247,7 @@ export function chooseAIAction(difficulty, player, state) {
           giftsAI[c] += 1;
         }
 
-        const score = scoreBoardState(player, g1, g2, state.secretCard[1], state.secretCard[2]);
+        const score = scoreBoardState(player, g1, g2, state.secretCard[1], state.secretCard[2], state.geishalove);
         if (score < worstCaseForAI) {
           worstCaseForAI = score;
         }
@@ -278,7 +289,7 @@ export function chooseAIAction(difficulty, player, state) {
         const oppA = player === 1 ? g2A : g1A;
         p1Cards.forEach((card) => { oppA[card] += 1; });
         p2Cards.forEach((card) => { aiA[card] += 1; });
-        const scoreIfOppPicks1 = scoreBoardState(player, g1A, g2A, state.secretCard[1], state.secretCard[2]);
+        const scoreIfOppPicks1 = scoreBoardState(player, g1A, g2A, state.secretCard[1], state.secretCard[2], state.geishalove);
 
         // If opp picks pair 2:
         const g1B = [...state.geishagifts[1]];
@@ -287,7 +298,7 @@ export function chooseAIAction(difficulty, player, state) {
         const oppB = player === 1 ? g2B : g1B;
         p2Cards.forEach((card) => { oppB[card] += 1; });
         p1Cards.forEach((card) => { aiB[card] += 1; });
-        const scoreIfOppPicks2 = scoreBoardState(player, g1B, g2B, state.secretCard[1], state.secretCard[2]);
+        const scoreIfOppPicks2 = scoreBoardState(player, g1B, g2B, state.secretCard[1], state.secretCard[2], state.geishalove);
 
         const guaranteedScore = Math.min(scoreIfOppPicks1, scoreIfOppPicks2);
         if (guaranteedScore > bestCompScore) {
@@ -369,7 +380,7 @@ export function chooseAIGiftResponse(difficulty, player, state, giftCards) {
       oppGifts[c] += 1;
     }
 
-    const score = scoreBoardState(player, g1, g2, state.secretCard[1], state.secretCard[2]);
+    const score = scoreBoardState(player, g1, g2, state.secretCard[1], state.secretCard[2], state.geishalove);
     if (score > bestScore) {
       bestScore = score;
       bestIndex = i;
@@ -401,7 +412,7 @@ export function chooseAICompetitionResponse(difficulty, player, state, firstPair
   const oppA = player === 1 ? g2A : g1A;
   firstPair.forEach((c) => { myA[c] += 1; });
   secondPair.forEach((c) => { oppA[c] += 1; });
-  const score1 = scoreBoardState(player, g1A, g2A, state.secretCard[1], state.secretCard[2]);
+  const score1 = scoreBoardState(player, g1A, g2A, state.secretCard[1], state.secretCard[2], state.geishalove);
 
   // Choice 2: AI takes secondPair, opponent gets firstPair
   const g1B = [...state.geishagifts[1]];
@@ -410,7 +421,7 @@ export function chooseAICompetitionResponse(difficulty, player, state, firstPair
   const oppB = player === 1 ? g2B : g1B;
   secondPair.forEach((c) => { myB[c] += 1; });
   firstPair.forEach((c) => { oppB[c] += 1; });
-  const score2 = scoreBoardState(player, g1B, g2B, state.secretCard[1], state.secretCard[2]);
+  const score2 = scoreBoardState(player, g1B, g2B, state.secretCard[1], state.secretCard[2], state.geishalove);
 
   return score1 >= score2 ? 1 : 2;
 }

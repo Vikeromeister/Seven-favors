@@ -184,4 +184,67 @@ test('Full round: 8 turns triggers endgame scoring', () => {
   assert.ok(typeof summary.player2.score === 'number');
   assert.ok(typeof summary.player1.geishaCount === 'number');
   assert.ok(typeof summary.player2.geishaCount === 'number');
+  assert.equal(summary.round, 1);
+});
+
+test('Multi-round tie continuation preserves geishalove and alternates starting player', () => {
+  Game.startGame();
+  // Guard: cannot start next round before current round is over
+  assert.equal(Game.startNextRound(), false);
+
+  // Setup tied end of round 1:
+  // Player 1 wins Geisha 1 (2 pts), Player 2 wins Geisha 2 (2 pts), all others tied at 0
+  Game.state.geishagifts[1] = [0, 2, 0, 0, 0, 0, 0, 0];
+  Game.state.geishagifts[2] = [0, 0, 2, 0, 0, 0, 0, 0];
+  Game.state.secretCard = [null, null, null];
+  Game.state.turnsTaken = 8;
+  Game.computeEndgame();
+  Game.state.gameOver = true;
+
+  assert.equal(Game.state.winner, 0); // Tie: both have 2 pts and 1 geisha
+  assert.equal(Game.state.geishalove[1], 1);
+  assert.equal(Game.state.geishalove[2], 2);
+  assert.equal(Game.state.round, 1);
+
+  const rowsR1 = Game.getGeishaRows();
+  assert.equal(rowsR1[0].owner, 1);
+  assert.equal(rowsR1[1].owner, 2);
+  assert.equal(rowsR1[0].priorOwner, 0);
+
+  // Start round 2
+  const started = Game.startNextRound();
+  assert.equal(started, true);
+  assert.equal(Game.state.round, 2);
+  assert.equal(Game.state.roundStarter, 2);
+  assert.equal(Game.state.currentPlayer, 2);
+  assert.equal(Game.state.turnsTaken, 0);
+  assert.equal(Game.state.gameOver, false);
+
+  // P2 drew 1 card (6 + 1 = 7), P1 has 6
+  assert.equal(Game.getHand(2).length, 7);
+  assert.equal(Game.getHand(1).length, 6);
+
+  // Preserved geishalove
+  assert.equal(Game.state.geishalove[1], 1);
+  assert.equal(Game.state.geishalove[2], 2);
+  assert.equal(Game.state.priorGeishaLove[1], 1);
+  assert.equal(Game.state.priorGeishaLove[2], 2);
+
+  // In Round 2, gifts tied at 0 on Geisha 1 must PRESERVE P1's ownership!
+  // Player 1 also wins Geisha 3 (2 pts) and Geisha 4 (3 pts) and Geisha 5 (3 pts) -> 10 pts, 4 geishas -> P1 wins
+  Game.state.geishagifts[1] = [0, 0, 0, 2, 2, 2, 0, 0];
+  Game.state.geishagifts[2] = [0, 0, 0, 0, 0, 0, 0, 0];
+  Game.computeEndgame();
+
+  assert.equal(Game.state.geishalove[1], 1); // Preserved from Round 1
+  assert.equal(Game.state.geishalove[2], 2); // Preserved from Round 1
+  assert.equal(Game.state.geishalove[3], 1);
+  assert.equal(Game.state.geishalove[4], 1);
+  assert.equal(Game.state.geishalove[5], 1);
+  assert.equal(Game.state.geishaCount[1], 4);
+  assert.equal(Game.state.winner, 1); // P1 wins with 4 geishas
+
+  // Guard: cannot start next round if there is a winner
+  Game.state.gameOver = true;
+  assert.equal(Game.startNextRound(), false);
 });

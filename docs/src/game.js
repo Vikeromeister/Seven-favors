@@ -13,6 +13,8 @@ const INITIAL_DECK = [1, 1, 2, 2, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7
 
 export const state = {
   deck: [],
+  round: 1,
+  roundStarter: 1,
   currentPlayer: 1,
   turnsTaken: 0,
   players: {
@@ -38,6 +40,7 @@ export const state = {
   geishagifts: [null, Array(8).fill(0), Array(8).fill(0)],
   secretCard: [null, null, null],
   geishalove: Array(8).fill(0),
+  priorGeishaLove: Array(8).fill(0),
   scores: [0, 0, 0],
   geishaCount: [0, 0, 0],
   gameOver: false,
@@ -70,9 +73,24 @@ export function cardValue(code) {
   return CARD_VALUES[code] || 0;
 }
 
-export function resetGame() {
+function recomputeScoresFromLove() {
+  state.scores = [0, 0, 0];
+  state.geishaCount = [0, 0, 0];
+  for (let i = 1; i <= 7; i++) {
+    if (state.geishalove[i] === 1) {
+      state.scores[1] += CARD_VALUES[i];
+      state.geishaCount[1] += 1;
+    } else if (state.geishalove[i] === 2) {
+      state.scores[2] += CARD_VALUES[i];
+      state.geishaCount[2] += 1;
+    }
+  }
+}
+
+function dealRound(starter) {
   state.deck = shuffle(INITIAL_DECK);
-  state.currentPlayer = 1;
+  state.roundStarter = starter;
+  state.currentPlayer = starter;
   state.turnsTaken = 0;
   state.players[1].hand = state.deck.slice(0, 6);
   state.players[2].hand = state.deck.slice(6, 12);
@@ -83,12 +101,34 @@ export function resetGame() {
   state.players[2].actions = { secret: true, tradeoff: true, gift: true, competition: true };
   state.geishagifts = [null, Array(8).fill(0), Array(8).fill(0)];
   state.secretCard = [null, null, null];
-  state.geishalove = Array(8).fill(0);
-  state.scores = [0, 0, 0];
-  state.geishaCount = [0, 0, 0];
   state.gameOver = false;
   state.winner = 0;
+}
+
+export function resetGame() {
+  state.round = 1;
+  dealRound(1);
+  state.geishalove = Array(8).fill(0);
+  state.priorGeishaLove = Array(8).fill(0);
+  state.scores = [0, 0, 0];
+  state.geishaCount = [0, 0, 0];
   state.message = 'The game has started. Player 1 goes first.';
+}
+
+export function startNextRound() {
+  if (!state.gameOver || state.winner !== 0) {
+    return false;
+  }
+  const preservedLove = [...state.geishalove];
+  const nextStarter = other(state.roundStarter);
+  state.round += 1;
+  dealRound(nextStarter);
+  state.geishalove = preservedLove;
+  state.priorGeishaLove = [...preservedLove];
+  recomputeScoresFromLove();
+  state.message = `Round ${state.round} has started. Player ${state.currentPlayer} goes first.`;
+  drawCard(state.currentPlayer);
+  return true;
 }
 
 export function startGame() {
@@ -228,26 +268,22 @@ export function performCompetition(player, cardIndexes, chosenPair) {
 }
 
 export function computeEndgame() {
+  state.priorGeishaLove = [...state.geishalove];
   if (state.secretCard[1] !== null) {
     state.geishagifts[1][state.secretCard[1]] += 1;
   }
   if (state.secretCard[2] !== null) {
     state.geishagifts[2][state.secretCard[2]] += 1;
   }
-  state.geishalove = Array(8).fill(0);
-  state.scores = [0, 0, 0];
-  state.geishaCount = [0, 0, 0];
   for (let i = 1; i <= 7; i++) {
     if (state.geishagifts[1][i] > state.geishagifts[2][i]) {
       state.geishalove[i] = 1;
-      state.scores[1] += CARD_VALUES[i];
-      state.geishaCount[1] += 1;
     } else if (state.geishagifts[2][i] > state.geishagifts[1][i]) {
       state.geishalove[i] = 2;
-      state.scores[2] += CARD_VALUES[i];
-      state.geishaCount[2] += 1;
     }
+    // Equal gifts: state.geishalove[i] stays unchanged (0 in Round 1, or preserved owner in Round 2+)
   }
+  recomputeScoresFromLove();
 
   const p1Points = state.scores[1] >= 11;
   const p2Points = state.scores[2] >= 11;
@@ -278,7 +314,7 @@ function finishGame() {
   computeEndgame();
   state.gameOver = true;
   if (state.winner === 0) {
-    state.message = 'Tie game!';
+    state.message = `Round ${state.round} ended in a tie!`;
   } else {
     state.message = `Game over! Player ${state.winner} wins.`;
   }
@@ -293,7 +329,8 @@ export function getGeishaRows() {
       value: CARD_VALUES[cardId],
       player1: state.geishagifts[1][cardId],
       player2: state.geishagifts[2][cardId],
-      owner: state.geishalove[cardId]
+      owner: state.geishalove[cardId],
+      priorOwner: state.priorGeishaLove[cardId]
     };
   });
 }
@@ -310,6 +347,7 @@ export function getResultSummary() {
       geishaCount: state.geishaCount[2],
       secretCard: state.secretCard[2]
     },
-    winner: state.winner
+    winner: state.winner,
+    round: state.round
   };
 }

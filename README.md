@@ -43,6 +43,8 @@ After 8 total turns (4 per player), all secret cards are revealed and character 
 - A player wins if they achieve **11 or more Charm Points** OR the favor of **4 or more Characters**.
 - **Precedence Rule:** If one player achieves 11+ Charm Points and the other achieves 4+ Characters, the player with **11+ Charm Points wins**.
 - Tiebreaker falls back to the higher total Charm Points.
+- **Tied Rounds & Multi-Round Play:** If neither player meets a victory condition at the end of the round, the round ends in a tie. All character favor states are preserved, and players can launch Round 2 (and subsequent rounds) upon approval, alternating the starting player, until someone wins.
+- **New Game Confirmation:** If a game is in progress, clicking the New Game button displays a confirmation dialog to prevent accidental restarts.
 
 ---
 

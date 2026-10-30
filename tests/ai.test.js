@@ -72,3 +72,20 @@ test('Hard AI Competition grouping pairs strategically', () => {
   assert.equal(decision.action, 'competition');
   assert.equal(decision.selected.length, 4);
 });
+
+test('AI evaluates preserved geishalove carryover in Round 2', () => {
+  Game.startGame();
+  // In Round 1, neutral board: Pair 1 ([7, 1] = 5+2 = 7 pts) beats Pair 2 ([4, 2] = 3+2 = 5 pts)
+  const choiceR1 = AI.chooseAICompetitionResponse('hard', 2, Game.state, [7, 1], [4, 2]);
+  assert.equal(choiceR1, 1);
+
+  // In Round 2: AI already owns Geishas 1, 2, 3 from Round 1
+  Game.state.round = 2;
+  Game.state.geishalove = [0, 2, 2, 2, 0, 0, 0, 0];
+  // Player 1 has 1 gift on card 7 (so AI taking 7 only ties at 1-1, yielding 0 geishas)
+  Game.state.geishagifts[1][7] = 1;
+
+  // Pair 2 contains card 4 (uncontested), which grants AI their 4th geisha and instant game win!
+  const choiceR2 = AI.chooseAICompetitionResponse('hard', 2, Game.state, [7, 1], [4, 2]);
+  assert.equal(choiceR2, 2);
+});
