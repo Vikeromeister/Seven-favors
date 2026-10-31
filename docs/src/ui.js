@@ -72,6 +72,7 @@ const els = {
   modeSelectionScreen: document.getElementById('mode-selection-screen'),
   aiCasualButton: document.getElementById('ai-casual-button'),
   aiTacticalButton: document.getElementById('ai-tactical-button'),
+  aiMasterButton: document.getElementById('ai-master-button'),
   roundBadge: document.getElementById('round-badge'),
   confirmModal: document.getElementById('confirm-modal'),
   confirmCancelButton: document.getElementById('confirm-cancel-button'),
