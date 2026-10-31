@@ -16,6 +16,7 @@ Compete online or locally against an AI engine featuring **3 difficulty levels**
 - **Viewport-Scaled Tabletop Stage:** Fixed 1760×900 presentation scaled smoothly to fit any viewport with zero scrolling, custom card artwork, hover-to-peek secret slots, and icon actions with tooltips.
 - **Animated Card Flights & History Rail:** Web Animations API 3D card flights and flips for every draw, secret, discard, offer, and endgame reveal, paired with a colour-coded move history rail (blue = You, red = Computer).
 - **Flexible Match Setup:** Choose your AI opponent (`Casual`, `Tactical`, or `Master`) and Round 1 starting player (`You`, `Computer`, or `Random`) before launching each game.
+- **View Board Peek Mode:** Hold or click the **View Board** button on AI Gift/Competition offers or round-end summary cards to briefly hide the popup, un-dim the central board, and inspect character favor, card counts, and move history before deciding.
 - **Visual Competition Pairing:** Real-time `1` and `2` pair badges on selected hand cards so you control exact competition splits.
 - **Automated Test Suite:** Built-in unit and simulation tests using Node.js's native test runner (`node:test`).
 

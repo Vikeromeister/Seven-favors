@@ -145,6 +145,10 @@ body {
   filter: brightness(0.55);
 }
 
+.stage.is-peeking .board-row.offer-active .board {
+  filter: none;
+}
+
 .geisha-grid {
   display: grid;
   grid-template-columns: repeat(7, 110px);
@@ -561,6 +565,7 @@ body {
   border: 2px solid var(--offer-color);
   backdrop-filter: blur(4px);
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.65);
+  transition: opacity 0.15s ease;
 }
 
 .offer-tray .tray-head {
@@ -574,7 +579,7 @@ body {
   white-space: nowrap;
 }
 
-.offer-tray .tray-head .icon {
+.offer-tray .tray-head > .icon {
   width: 40px;
   height: 40px;
   color: var(--offer-color);
@@ -615,6 +620,42 @@ body {
 
 .offer-tray .chosen-2 {
   outline: 3px solid var(--ai-color);
+}
+
+.peek-trigger-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.tray-peek-btn {
+  margin-top: 8px;
+  padding: 7px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  transform: translateY(0);
+  transition: background 0.15s, border-color 0.15s, transform 0.15s;
+}
+
+.tray-peek-btn .icon {
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+}
+
+.tray-peek-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(244, 211, 94, 0.55);
+  transform: translateY(-1px);
 }
 
 /* History Rail */
@@ -775,6 +816,54 @@ body {
   z-index: 100;
   background: rgba(6, 12, 22, 0.55);
   backdrop-filter: blur(4px);
+  transition: opacity 0.15s ease;
+}
+
+.stage.is-peeking .offer-tray,
+.stage.is-peeking .result-panel {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.peek-restore-btn {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  translate: -50% 0;
+  z-index: 115;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 20px;
+  border-radius: 9999px;
+  border: none;
+  font-size: 0.92rem;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 0 0 3px rgba(244, 211, 94, 0.32), 0 10px 24px rgba(0, 0, 0, 0.55);
+  transform: translateY(0);
+  transition: transform 0.15s, filter 0.15s;
+}
+
+.peek-restore-btn .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.peek-restore-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+}
+
+.peek-restore-btn.holding {
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .offer-tray,
+  .result-panel {
+    transition: none;
+  }
 }
 
 .mode-selection-screen {
@@ -921,6 +1010,26 @@ body {
 .restart-result-btn:hover {
   transform: translateY(-2px);
   filter: brightness(1.08);
+}
+
+.result-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 14px;
+}
+
+.result-peek-btn {
+  padding: 14px 24px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.result-peek-btn .icon {
+  width: 20px;
+  height: 20px;
+  color: var(--accent);
 }
 
 .mode-selection-card {

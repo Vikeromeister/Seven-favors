@@ -117,6 +117,7 @@ npm test
    - Renders a left-hand move history rail colour-coded by actor (**blue** = player, **red** = computer), newest move on top, with hover popouts showing card destinations.
    - Competition selection displays `1` and `2` pair badges on selected cards; endgame reveal animates secret cards onto stacks and shows `▼ You` / `▲ AI` favor markers and the result summary.
    - **Round Continuation & Confirmation:** Tie rounds display who goes first next and a `"Start Round N"` approval button on the result panel (does not offer a fresh restart). Clicking the New Game button at any point during an ongoing match displays an in-stage confirmation modal asking if the user is sure.
+   - **View Board Peek Mode:** Interactive pop-up overlays (AI Gift/Competition offer tray and the end-of-round result panel) include a **View Board** button supporting both press-and-hold to peek and click/keyboard toggle (`#peek-restore-button`) so the player can inspect un-dimmed character columns, secret slots, and the move history rail at any time without accidental input.
 
 5. **`docs/src/styles.css` (Styling & Layout)**
    - Fixed-stage `1760×900` grid layout scaled by `--stage-scale`, zero page scrolling (`overflow: hidden`).

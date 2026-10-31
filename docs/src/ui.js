@@ -82,8 +82,11 @@ const els = {
   roundBadge: document.getElementById('round-badge'),
   confirmModal: document.getElementById('confirm-modal'),
   confirmCancelButton: document.getElementById('confirm-cancel-button'),
-  confirmAcceptButton: document.getElementById('confirm-accept-button')
+  confirmAcceptButton: document.getElementById('confirm-accept-button'),
+  peekRestoreButton: document.getElementById('peek-restore-button')
 };
+
+const PEEK_HOLD_MS = 220;
 
 let aiDifficulty = 'medium';
 let startingPlayerPref = HUMAN; // 1 (HUMAN) | 2 (AI_PLAYER) | 'random'
@@ -99,6 +102,10 @@ let resultReady = false;    // result panel is visible
 let gameToken = 0;          // bumped on new game; async sequences abort when it changes
 let currentScale = 1;
 let gameStarted = false;    // true from startNewGame() until a winner's result panel is shown or game is ended
+let peekState = 'closed';          // 'closed' | 'holding' | 'latched'
+let peekDownAt = 0;
+let peekPointerId = null;
+let suppressTriggerClickUntil = 0; // blocks synthetic click after pointerup on .peek-trigger-btn
 
 /* --- Modal Helpers --- */
 
@@ -107,12 +114,99 @@ function isConfirmModalOpen() {
 }
 
 function openConfirmModal() {
+  stopPeek(false);
   els.confirmModal.classList.remove('hidden');
   els.confirmCancelButton.focus();
 }
 
 function closeConfirmModal() {
   els.confirmModal.classList.add('hidden');
+}
+
+function canPeekBoard() {
+  return Boolean(
+    (pendingOffer && pendingOffer.interactive) ||
+    (Game.state.gameOver && resultReady)
+  );
+}
+
+function activePeekTrigger() {
+  if (Game.state.gameOver && resultReady) {
+    return els.resultPanel.querySelector('.peek-trigger-btn');
+  }
+  if (pendingOffer && pendingOffer.interactive) {
+    return els.offerTray.querySelector('.peek-trigger-btn');
+  }
+  return null;
+}
+
+function updatePeekUI() {
+  const active = peekState !== 'closed' && canPeekBoard();
+  els.stage.classList.toggle('is-peeking', active);
+
+  const latched = peekState === 'latched' && active;
+  els.offerTray.inert = latched;
+  els.resultPanel.inert = latched;
+
+  if (!active) {
+    els.peekRestoreButton.classList.add('hidden');
+    els.peekRestoreButton.classList.remove('holding');
+    return;
+  }
+
+  const targetName = Game.state.gameOver && resultReady ? 'Summary' : 'Offer';
+  const label = peekState === 'holding'
+    ? 'Viewing Board — Release to Return'
+    : `Show ${targetName}`;
+  els.peekRestoreButton.innerHTML = `${iconSvg('eye-off')}<span>${label}</span>`;
+  els.peekRestoreButton.setAttribute('aria-label', `Show ${targetName.toLowerCase()}`);
+  els.peekRestoreButton.classList.toggle('holding', peekState === 'holding');
+  els.peekRestoreButton.classList.remove('hidden');
+}
+
+function beginPeekHold(pointerId) {
+  peekState = 'holding';
+  peekDownAt = performance.now();
+  peekPointerId = pointerId;
+  updatePeekUI();
+}
+
+function latchPeek() {
+  peekState = 'latched';
+  peekPointerId = null;
+  updatePeekUI();
+  els.peekRestoreButton.focus({ preventScroll: true });
+}
+
+function stopPeek(restoreFocus = false) {
+  const wasOpen = peekState !== 'closed';
+  peekState = 'closed';
+  peekPointerId = null;
+  updatePeekUI();
+  if (wasOpen && restoreFocus) {
+    const trigger = activePeekTrigger();
+    if (trigger) trigger.focus({ preventScroll: true });
+  }
+}
+
+function handlePeekPointerEnd(e) {
+  if (peekState !== 'holding') return;
+  if (peekPointerId !== null && e.pointerId !== peekPointerId) return;
+
+  suppressTriggerClickUntil = performance.now() + 300;
+  const heldMs = performance.now() - peekDownAt;
+  peekPointerId = null;
+
+  if (e.type === 'pointercancel' || !canPeekBoard() || isConfirmModalOpen()) {
+    stopPeek(false);
+    return;
+  }
+
+  if (heldMs >= PEEK_HOLD_MS) {
+    stopPeek(false);
+  } else {
+    latchPeek();
+  }
 }
 
 function updateSetupSelectionUI() {
@@ -410,6 +504,14 @@ function renderOfferTray() {
     const label = document.createElement('span');
     label.textContent = pendingOffer.kind === 'gift' ? 'Pick a card' : 'Pick a pair';
     head.appendChild(label);
+
+    const peekBtn = document.createElement('button');
+    peekBtn.type = 'button';
+    peekBtn.className = 'peek-trigger-btn tray-peek-btn';
+    peekBtn.dataset.tip = 'Hold or click to view the board';
+    peekBtn.setAttribute('aria-label', 'View board');
+    peekBtn.innerHTML = `${iconSvg('eye')}<span>View Board</span>`;
+    head.appendChild(peekBtn);
   }
   nodes.push(head);
 
@@ -521,18 +623,35 @@ function buildResultPanel() {
     </div>
   `;
 
+  const actionsRow = document.createElement('div');
+  actionsRow.className = 'result-actions';
+
+  const peekBtn = document.createElement('button');
+  peekBtn.className = 'secondary restart-result-btn peek-trigger-btn result-peek-btn';
+  peekBtn.type = 'button';
+  peekBtn.dataset.tip = 'Hold or click to view the board';
+  peekBtn.setAttribute('aria-label', 'View board');
+  peekBtn.innerHTML = `${iconSvg('eye')}<span>View Board</span>`;
+
   const actionBtn = document.createElement('button');
   actionBtn.className = 'primary restart-result-btn';
   actionBtn.type = 'button';
   if (isTie) {
     actionBtn.textContent = `Start Round ${result.round + 1}`;
-    actionBtn.addEventListener('click', () => beginNextRound());
+    actionBtn.addEventListener('click', () => {
+      if (peekState !== 'closed') return;
+      beginNextRound();
+    });
   } else {
     actionBtn.textContent = 'Play Again';
-    actionBtn.addEventListener('click', () => showModeSelection());
+    actionBtn.addEventListener('click', () => {
+      if (peekState !== 'closed') return;
+      showModeSelection();
+    });
   }
 
-  card.appendChild(actionBtn);
+  actionsRow.append(peekBtn, actionBtn);
+  card.appendChild(actionsRow);
   els.resultPanel.replaceChildren(card);
 }
 
@@ -578,6 +697,11 @@ function render() {
   updateActionBar();
   renderOfferTray();
   buildResultPanel();
+  if (!canPeekBoard() && peekState !== 'closed') {
+    stopPeek(false);
+  } else {
+    updatePeekUI();
+  }
 }
 
 /* --- Input --- */
@@ -620,6 +744,7 @@ async function confirmSelection() {
     await playHumanTurn(type, [...selected]);
   } catch (err) {
     console.error(err);
+    stopPeek(false);
     Fx.clearFx();
     pendingOffer = null;
     animating = false;
@@ -628,7 +753,8 @@ async function confirmSelection() {
 }
 
 function resolveOfferChoice(choice) {
-  if (!pendingOffer?.interactive || !pendingOffer.resolve) return;
+  if (!pendingOffer?.interactive || !pendingOffer.resolve || peekState !== 'closed') return;
+  stopPeek(false);
   const resolve = pendingOffer.resolve;
   pendingOffer.interactive = false;
   pendingOffer.resolve = null;
@@ -1116,6 +1242,7 @@ async function animateReveal(token) {
 
 function resetUIState() {
   gameToken += 1;
+  stopPeek(false);
   Fx.clearFx();
   pendingAction = null;
   pendingOffer = null;
@@ -1139,6 +1266,7 @@ async function kickoffRound() {
       await playAITurn(token);
     } catch (err) {
       console.error(err);
+      stopPeek(false);
       Fx.clearFx();
       pendingOffer = null;
       animating = false;
@@ -1233,7 +1361,7 @@ export function startApp() {
   });
 
   els.offerTray.addEventListener('click', (e) => {
-    if (!pendingOffer?.interactive) return;
+    if (!pendingOffer?.interactive || peekState !== 'closed') return;
     if (pendingOffer.kind === 'competition') {
       const pairBtn = e.target.closest('button[data-pair]');
       if (pairBtn) resolveOfferChoice(Number(pairBtn.dataset.pair));
@@ -1242,6 +1370,36 @@ export function startApp() {
       if (slotBtn) resolveOfferChoice(Number(slotBtn.dataset.slot));
     }
   });
+
+  els.stage.addEventListener('pointerdown', (e) => {
+    const btn = e.target.closest('.peek-trigger-btn');
+    if (!btn) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (!canPeekBoard() || isConfirmModalOpen()) return;
+    beginPeekHold(e.pointerId);
+  });
+
+  els.stage.addEventListener('contextmenu', (e) => {
+    if (e.target.closest('.peek-trigger-btn')) {
+      e.preventDefault();
+    }
+  });
+
+  els.stage.addEventListener('click', (e) => {
+    const btn = e.target.closest('.peek-trigger-btn');
+    if (!btn) return;
+    if (performance.now() < suppressTriggerClickUntil) return;
+    if (!canPeekBoard() || isConfirmModalOpen()) return;
+    latchPeek();
+  });
+
+  window.addEventListener('pointerup', handlePeekPointerEnd);
+  window.addEventListener('pointercancel', handlePeekPointerEnd);
+  window.addEventListener('blur', () => {
+    if (peekState === 'holding') stopPeek(false);
+  });
+
+  els.peekRestoreButton.addEventListener('click', () => stopPeek(true));
 
   document.addEventListener('keydown', (e) => {
     if (isConfirmModalOpen()) {
@@ -1252,6 +1410,16 @@ export function startApp() {
       return;
     }
     if (!els.modeSelectionScreen.classList.contains('hidden')) return;
+    if (peekState !== 'closed') {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        stopPeek(true);
+      } else if (e.key === ' ' && e.target !== els.peekRestoreButton) {
+        e.preventDefault();
+        stopPeek(true);
+      }
+      return;
+    }
     if (e.key === 'Escape') {
       if (pendingAction && !animating && !pendingOffer) {
         pendingAction = null;
