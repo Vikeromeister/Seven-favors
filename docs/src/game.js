@@ -367,3 +367,79 @@ export function getResultSummary() {
     roundStarter: state.roundStarter
   };
 }
+
+/**
+ * Builds a JSON-serializable state snapshot for `viewerSeat` (1 or 2) with
+ * hidden information masked: deck contents and opponent hand cards are replaced
+ * by counts, and the opponent's secret card is masked as `0` until `gameOver`.
+ * @param {1 | 2} viewerSeat
+ */
+export function buildPlayerView(viewerSeat) {
+  const seat = viewerSeat === 2 ? 2 : 1;
+  const opp = other(seat);
+  const oppSecretRaw = state.secretCard[opp];
+  const oppSecretMasked = state.gameOver
+    ? oppSecretRaw
+    : (oppSecretRaw !== null ? 0 : null);
+
+  return {
+    viewerSeat: seat,
+    round: state.round,
+    roundStarter: state.roundStarter,
+    currentPlayer: state.currentPlayer,
+    turnsTaken: state.turnsTaken,
+    deckCount: state.deck.length,
+    myHand: [...state.players[seat].hand],
+    oppHandCount: state.players[opp].hand.length,
+    actions: {
+      1: { ...state.players[1].actions },
+      2: { ...state.players[2].actions }
+    },
+    geishagifts: [
+      null,
+      [...state.geishagifts[1]],
+      [...state.geishagifts[2]]
+    ],
+    secretCard: seat === 1
+      ? [null, state.secretCard[1], oppSecretMasked]
+      : [null, oppSecretMasked, state.secretCard[2]],
+    geishalove: [...state.geishalove],
+    priorGeishaLove: [...state.priorGeishaLove],
+    scores: [...state.scores],
+    geishaCount: [...state.geishaCount],
+    gameOver: state.gameOver,
+    winner: state.winner,
+    message: state.message
+  };
+}
+
+/**
+ * Applies a `buildPlayerView` snapshot onto local `state` for client rendering.
+ * @param {ReturnType<typeof buildPlayerView>} view
+ */
+export function applyPlayerView(view) {
+  const seat = view.viewerSeat === 2 ? 2 : 1;
+  const opp = other(seat);
+  state.round = view.round;
+  state.roundStarter = view.roundStarter;
+  state.currentPlayer = view.currentPlayer;
+  state.turnsTaken = view.turnsTaken;
+  state.deck = Array(view.deckCount).fill(0);
+  state.players[seat].hand = [...view.myHand];
+  state.players[opp].hand = Array(view.oppHandCount).fill(0);
+  state.players[1].actions = { ...view.actions[1] };
+  state.players[2].actions = { ...view.actions[2] };
+  state.geishagifts = [
+    null,
+    [...view.geishagifts[1]],
+    [...view.geishagifts[2]]
+  ];
+  state.secretCard = [null, view.secretCard[1], view.secretCard[2]];
+  state.geishalove = [...view.geishalove];
+  state.priorGeishaLove = [...view.priorGeishaLove];
+  state.scores = [...view.scores];
+  state.geishaCount = [...view.geishaCount];
+  state.gameOver = Boolean(view.gameOver);
+  state.winner = view.winner;
+  state.message = view.message || '';
+}

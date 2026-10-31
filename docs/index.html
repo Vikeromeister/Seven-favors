@@ -17,7 +17,7 @@
         <header class="top-bar">
           <span id="round-badge" class="badge">Round 1</span>
           <span id="turn-badge" class="badge">Turn 1 / 8</span>
-          <span id="difficulty-badge" class="badge">Tactical AI</span>
+          <span id="difficulty-badge" class="badge">Medium AI</span>
           <button id="restart-button" class="icon-btn" type="button" data-tip="New game" aria-label="New game">
             <svg class="icon" aria-hidden="true"><use href="#icon-restart"/></svg>
           </button>
@@ -75,39 +75,84 @@
           <h1>Seven Favors</h1>
           <p class="subtitle">A tactical duel of secret gifts, shrewd trades, and contested favor.</p>
 
-          <p class="mode-desc">Choose your opponent:</p>
-          <div id="difficulty-buttons" class="setup-buttons" role="group" aria-label="AI difficulty">
-            <button id="ai-casual-button" class="setup-button" type="button" data-diff="easy" aria-pressed="false">
-              <strong>Casual</strong>
-              <span>Easy / Relaxed</span>
+          <p class="mode-desc">Game mode:</p>
+          <div id="game-mode-buttons" class="setup-buttons two-col" role="group" aria-label="Game mode">
+            <button id="mode-ai-button" class="setup-button selected" type="button" data-mode="ai" aria-pressed="true">
+              <strong>Single Player</strong>
+              <span>Play vs Computer</span>
             </button>
-            <button id="ai-tactical-button" class="setup-button selected" type="button" data-diff="medium" aria-pressed="true">
-              <strong>Tactical</strong>
-              <span>Medium / Balanced</span>
-            </button>
-            <button id="ai-master-button" class="setup-button" type="button" data-diff="hard" aria-pressed="false">
-              <strong>Master</strong>
-              <span>Hard / Minimax</span>
+            <button id="mode-online-button" class="setup-button" type="button" data-mode="online" aria-pressed="false">
+              <strong>Online 2P</strong>
+              <span>Play over the internet</span>
             </button>
           </div>
 
-          <p class="mode-desc">Starting player:</p>
-          <div id="starter-buttons" class="setup-buttons" role="group" aria-label="Starting player">
-            <button id="starter-human-button" class="setup-button selected" type="button" data-starter="1" aria-pressed="true">
-              <strong>You</strong>
-              <span>You go first</span>
-            </button>
-            <button id="starter-ai-button" class="setup-button" type="button" data-starter="2" aria-pressed="false">
-              <strong>Computer</strong>
-              <span>AI goes first</span>
-            </button>
-            <button id="starter-random-button" class="setup-button" type="button" data-starter="random" aria-pressed="false">
-              <strong>Random</strong>
-              <span>Coin toss</span>
-            </button>
+          <div id="ai-setup-section">
+            <p class="mode-desc">AI difficulty:</p>
+            <div id="difficulty-buttons" class="setup-buttons" role="group" aria-label="AI difficulty">
+              <button id="ai-easy-button" class="setup-button" type="button" data-diff="easy" aria-pressed="false">
+                <strong>Easy</strong>
+                <span>Relaxed play</span>
+              </button>
+              <button id="ai-medium-button" class="setup-button selected" type="button" data-diff="medium" aria-pressed="true">
+                <strong>Medium</strong>
+                <span>Balanced tactics</span>
+              </button>
+              <button id="ai-hard-button" class="setup-button" type="button" data-diff="hard" aria-pressed="false">
+                <strong>Hard</strong>
+                <span>Optimal minimax</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="starter-setup-section">
+            <p class="mode-desc">Starting player:</p>
+            <div id="starter-buttons" class="setup-buttons" role="group" aria-label="Starting player">
+              <button id="starter-human-button" class="setup-button" type="button" data-starter="1" aria-pressed="false">
+                <strong id="starter-p1-title">You</strong>
+                <span id="starter-p1-sub">You go first</span>
+              </button>
+              <button id="starter-ai-button" class="setup-button" type="button" data-starter="2" aria-pressed="false">
+                <strong id="starter-p2-title">Computer</strong>
+                <span id="starter-p2-sub">AI goes first</span>
+              </button>
+              <button id="starter-random-button" class="setup-button selected" type="button" data-starter="random" aria-pressed="true">
+                <strong>Random</strong>
+                <span>Coin toss</span>
+              </button>
+            </div>
           </div>
 
           <button id="start-game-button" class="primary start-game-btn" type="button">Start Game</button>
+
+          <div id="online-setup-section" class="online-setup hidden">
+            <div id="online-role-tabs" class="online-role-tabs" role="group" aria-label="Online role">
+              <button id="online-tab-host" class="role-tab-btn selected" type="button" data-online-tab="host" aria-pressed="true">Host Game</button>
+              <button id="online-tab-join" class="role-tab-btn" type="button" data-online-tab="join" aria-pressed="false">Join Game</button>
+            </div>
+
+            <div id="online-host-panel">
+              <button id="create-room-button" class="primary start-game-btn" type="button">Create Room</button>
+              <div id="host-lobby-box" class="lobby-box hidden">
+                <div class="lobby-label">Share Room Code</div>
+                <div id="lobby-room-code" class="room-code-value">------</div>
+                <div class="lobby-copy-row">
+                  <button id="copy-code-button" class="secondary lobby-copy-btn" type="button">Copy Code</button>
+                  <button id="copy-link-button" class="secondary lobby-copy-btn" type="button">Copy Invite Link</button>
+                </div>
+                <p id="host-lobby-status" class="online-status">Waiting for opponent to join…</p>
+                <button id="cancel-room-button" class="secondary lobby-cancel-btn" type="button">Cancel Room</button>
+              </div>
+            </div>
+
+            <div id="online-join-panel" class="hidden">
+              <label class="mode-desc join-label" for="join-code-input">Enter 6-character room code:</label>
+              <input id="join-code-input" class="room-code-input" type="text" maxlength="6" placeholder="K7M4P9" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+              <p id="join-status-msg" class="online-status hidden"></p>
+              <button id="join-room-button" class="primary start-game-btn" type="button">Join Room</button>
+              <button id="cancel-join-button" class="secondary lobby-cancel-btn hidden" type="button">Cancel</button>
+            </div>
+          </div>
 
           <p class="disclaimer">Inspired by the core tabletop game mechanics designed by Kota Nakayama. <em>Hanamikoji</em> is a registered trademark of EmperorS4 and Taiwan Boardgame Design. All code and visual assets in this project are independent and created for non-commercial educational purposes.</p>
         </div>
@@ -120,6 +165,16 @@
           <div class="confirm-modal-actions">
             <button id="confirm-cancel-button" class="modal-btn secondary" type="button">Cancel</button>
             <button id="confirm-accept-button" class="modal-btn danger" type="button">Yes, New Game</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="disconnect-modal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="disconnect-modal-title">
+        <div class="confirm-modal-card">
+          <h2 id="disconnect-modal-title">Opponent Disconnected</h2>
+          <p id="disconnect-modal-desc" class="confirm-modal-desc">Your opponent left the match or lost connection.</p>
+          <div class="confirm-modal-actions">
+            <button id="disconnect-ok-button" class="modal-btn primary" type="button">Back to Menu</button>
           </div>
         </div>
       </div>

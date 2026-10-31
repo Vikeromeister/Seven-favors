@@ -1,6 +1,7 @@
 import * as Game from './game.js';
 import * as AI from './ai.js';
 import * as Fx from './fx.js';
+import * as Net from './net.js';
 
 const HUMAN = 1;
 const AI_PLAYER = 2;
@@ -10,7 +11,7 @@ const STACK_OFFSET = 8; // === CSS --stack-off
 const ACTIONS = ['secret', 'tradeoff', 'gift', 'competition'];
 const ACTION_COUNTS = { secret: 1, tradeoff: 2, gift: 3, competition: 4 };
 const ACTION_NAMES = { secret: 'Secret', tradeoff: 'Tradeoff', gift: 'Gift', competition: 'Competition' };
-const DIFF_LABELS = { easy: 'Casual', medium: 'Tactical', hard: 'Master' };
+const DIFF_LABELS = { easy: 'Easy', medium: 'Medium', hard: 'Hard' };
 
 const ASSET_BASE = 'assets/';
 
@@ -51,6 +52,7 @@ const geishaFront = (id) => `${ASSET_BASE}${GEISHA_IMAGE_FILES[id]}`;
 const els = {
   stage: document.getElementById('stage'),
   historyList: document.getElementById('history-list'),
+  roundBadge: document.getElementById('round-badge'),
   turnBadge: document.getElementById('turn-badge'),
   difficultyBadge: document.getElementById('difficulty-badge'),
   restartButton: document.getElementById('restart-button'),
@@ -69,27 +71,55 @@ const els = {
   actionBar: document.getElementById('action-bar'),
   confirmButton: document.getElementById('confirm-button'),
   resultPanel: document.getElementById('result-panel'),
+  peekRestoreButton: document.getElementById('peek-restore-button'),
   modeSelectionScreen: document.getElementById('mode-selection-screen'),
+  gameModeButtons: document.getElementById('game-mode-buttons'),
+  modeAiButton: document.getElementById('mode-ai-button'),
+  modeOnlineButton: document.getElementById('mode-online-button'),
+  aiSetupSection: document.getElementById('ai-setup-section'),
   difficultyButtons: document.getElementById('difficulty-buttons'),
-  aiCasualButton: document.getElementById('ai-casual-button'),
-  aiTacticalButton: document.getElementById('ai-tactical-button'),
-  aiMasterButton: document.getElementById('ai-master-button'),
+  aiEasyButton: document.getElementById('ai-easy-button'),
+  aiMediumButton: document.getElementById('ai-medium-button'),
+  aiHardButton: document.getElementById('ai-hard-button'),
+  starterSetupSection: document.getElementById('starter-setup-section'),
   starterButtons: document.getElementById('starter-buttons'),
   starterHumanButton: document.getElementById('starter-human-button'),
   starterAiButton: document.getElementById('starter-ai-button'),
   starterRandomButton: document.getElementById('starter-random-button'),
+  starterP1Title: document.getElementById('starter-p1-title'),
+  starterP1Sub: document.getElementById('starter-p1-sub'),
+  starterP2Title: document.getElementById('starter-p2-title'),
+  starterP2Sub: document.getElementById('starter-p2-sub'),
   startGameButton: document.getElementById('start-game-button'),
-  roundBadge: document.getElementById('round-badge'),
+  onlineSetupSection: document.getElementById('online-setup-section'),
+  onlineRoleTabs: document.getElementById('online-role-tabs'),
+  onlineTabHost: document.getElementById('online-tab-host'),
+  onlineTabJoin: document.getElementById('online-tab-join'),
+  onlineHostPanel: document.getElementById('online-host-panel'),
+  createRoomButton: document.getElementById('create-room-button'),
+  hostLobbyBox: document.getElementById('host-lobby-box'),
+  lobbyRoomCode: document.getElementById('lobby-room-code'),
+  copyCodeButton: document.getElementById('copy-code-button'),
+  copyLinkButton: document.getElementById('copy-link-button'),
+  hostLobbyStatus: document.getElementById('host-lobby-status'),
+  cancelRoomButton: document.getElementById('cancel-room-button'),
+  onlineJoinPanel: document.getElementById('online-join-panel'),
+  joinCodeInput: document.getElementById('join-code-input'),
+  joinStatusMsg: document.getElementById('join-status-msg'),
+  joinRoomButton: document.getElementById('join-room-button'),
+  cancelJoinButton: document.getElementById('cancel-join-button'),
   confirmModal: document.getElementById('confirm-modal'),
   confirmCancelButton: document.getElementById('confirm-cancel-button'),
   confirmAcceptButton: document.getElementById('confirm-accept-button'),
-  peekRestoreButton: document.getElementById('peek-restore-button')
+  disconnectModal: document.getElementById('disconnect-modal'),
+  disconnectModalDesc: document.getElementById('disconnect-modal-desc'),
+  disconnectOkButton: document.getElementById('disconnect-ok-button')
 };
 
 const PEEK_HOLD_MS = 220;
 
 let aiDifficulty = 'medium';
-let startingPlayerPref = HUMAN; // 1 (HUMAN) | 2 (AI_PLAYER) | 'random'
+let startingPlayerPref = 'random'; // 1 | 2 | 'random'
 let pendingAction = null;   // { type, selected: number[], max }
 let pendingOffer = null;    // { kind:'gift'|'competition', offerer:1|2, cards:number[], revealed:boolean,
                             //   interactive:boolean, chosen:number|null, hidden:Set<number>, resolve:Function|null }
@@ -102,10 +132,27 @@ let resultReady = false;    // result panel is visible
 let gameToken = 0;          // bumped on new game; async sequences abort when it changes
 let currentScale = 1;
 let gameStarted = false;    // true from startNewGame() until a winner's result panel is shown or game is ended
-let peekState = 'closed';          // 'closed' | 'holding' | 'latched'
+let peekState = 'closed';   // 'closed' | 'holding' | 'latched'
 let peekDownAt = 0;
 let peekPointerId = null;
 let suppressTriggerClickUntil = 0; // blocks synthetic click after pointerup on .peek-trigger-btn
+
+// Online 2P State
+let setupMode = 'ai';       // 'ai' | 'online'
+let onlineTab = 'host';     // 'host' | 'join'
+let onlineBusy = false;     // true while creating/joining a room
+let gameMode = 'ai';        // 'ai' | 'online'
+let localSeat = 1;          // 1 (Host or AI human) | 2 (Guest)
+let netSession = null;
+let onlineRoomCode = null;
+let localReadyNext = false;
+let remoteReadyNext = false;
+let pendingSignals = new Map(); // type -> resolve[]
+let turnQueue = Promise.resolve();
+
+const oppSeat = () => Game.other(localSeat);
+const oppName = () => (gameMode === 'online' ? 'Opponent' : 'Computer');
+const oppFavorTag = () => (gameMode === 'online' ? '▲ Opp' : '▲ AI');
 
 /* --- Modal Helpers --- */
 
@@ -123,9 +170,24 @@ function closeConfirmModal() {
   els.confirmModal.classList.add('hidden');
 }
 
+function isDisconnectModalOpen() {
+  return !els.disconnectModal.classList.contains('hidden');
+}
+
+function openDisconnectModal(msg = 'Your opponent left the match or lost connection.') {
+  stopPeek(false);
+  els.disconnectModalDesc.textContent = msg;
+  els.disconnectModal.classList.remove('hidden');
+  els.disconnectOkButton.focus();
+}
+
+function closeDisconnectModal() {
+  els.disconnectModal.classList.add('hidden');
+}
+
 function canPeekBoard() {
   return Boolean(
-    (pendingOffer && pendingOffer.interactive) ||
+    (pendingOffer && (pendingOffer.interactive || (gameMode === 'online' && pendingOffer.revealed && pendingOffer.chosen === null))) ||
     (Game.state.gameOver && resultReady)
   );
 }
@@ -134,7 +196,7 @@ function activePeekTrigger() {
   if (Game.state.gameOver && resultReady) {
     return els.resultPanel.querySelector('.peek-trigger-btn');
   }
-  if (pendingOffer && pendingOffer.interactive) {
+  if (pendingOffer && (pendingOffer.interactive || (gameMode === 'online' && pendingOffer.revealed && pendingOffer.chosen === null))) {
     return els.offerTray.querySelector('.peek-trigger-btn');
   }
   return null;
@@ -197,7 +259,7 @@ function handlePeekPointerEnd(e) {
   const heldMs = performance.now() - peekDownAt;
   peekPointerId = null;
 
-  if (e.type === 'pointercancel' || !canPeekBoard() || isConfirmModalOpen()) {
+  if (e.type === 'pointercancel' || !canPeekBoard() || isConfirmModalOpen() || isDisconnectModalOpen()) {
     stopPeek(false);
     return;
   }
@@ -210,11 +272,50 @@ function handlePeekPointerEnd(e) {
 }
 
 function updateSetupSelectionUI() {
-  els.difficultyButtons.querySelectorAll('[data-diff]').forEach((btn) => {
-    const active = btn.dataset.diff === aiDifficulty;
+  const isOnline = setupMode === 'online';
+
+  els.gameModeButtons.querySelectorAll('[data-mode]').forEach((btn) => {
+    const active = btn.dataset.mode === setupMode;
     btn.classList.toggle('selected', active);
     btn.setAttribute('aria-pressed', String(active));
   });
+
+  els.aiSetupSection.classList.toggle('hidden', isOnline);
+  els.startGameButton.classList.toggle('hidden', isOnline);
+  els.onlineSetupSection.classList.toggle('hidden', !isOnline);
+
+  if (!isOnline) {
+    els.starterSetupSection.classList.remove('hidden');
+    els.starterP1Title.textContent = 'You';
+    els.starterP1Sub.textContent = 'You go first';
+    els.starterP2Title.textContent = 'Computer';
+    els.starterP2Sub.textContent = 'AI goes first';
+
+    els.difficultyButtons.querySelectorAll('[data-diff]').forEach((btn) => {
+      const active = btn.dataset.diff === aiDifficulty;
+      btn.classList.toggle('selected', active);
+      btn.setAttribute('aria-pressed', String(active));
+    });
+  } else {
+    els.onlineRoleTabs.querySelectorAll('[data-online-tab]').forEach((btn) => {
+      const active = btn.dataset.onlineTab === onlineTab;
+      btn.classList.toggle('selected', active);
+      btn.setAttribute('aria-pressed', String(active));
+    });
+
+    const isHost = onlineTab === 'host';
+    els.onlineHostPanel.classList.toggle('hidden', !isHost);
+    els.onlineJoinPanel.classList.toggle('hidden', isHost);
+    els.starterSetupSection.classList.toggle('hidden', !isHost);
+
+    if (isHost) {
+      els.starterP1Title.textContent = 'You';
+      els.starterP1Sub.textContent = 'Host goes first';
+      els.starterP2Title.textContent = 'Opponent';
+      els.starterP2Sub.textContent = 'Guest goes first';
+    }
+  }
+
   els.starterButtons.querySelectorAll('[data-starter]').forEach((btn) => {
     const val = btn.dataset.starter === 'random' ? 'random' : Number(btn.dataset.starter);
     const active = val === startingPlayerPref;
@@ -235,8 +336,8 @@ function iconSvg(name, cls = 'icon') {
 
 function makeCard(cardId, h, extraClass = '') {
   const d = document.createElement('div');
-  d.className = `card ${cardId == null ? 'back' : ''} ${extraClass}`.trim().replace(/\s+/g, ' ');
-  if (cardId != null) {
+  d.className = `card ${cardId == null || cardId === 0 ? 'back' : ''} ${extraClass}`.trim().replace(/\s+/g, ' ');
+  if (cardId != null && cardId !== 0) {
     d.style.backgroundImage = `url('${cardFront(cardId)}')`;
   }
   d.style.setProperty('--h', h);
@@ -251,7 +352,7 @@ function makeEmptySlot(h) {
 }
 
 function handEl(player, index) {
-  return (player === HUMAN ? els.handList : els.opponentHandList).querySelector(`[data-index="${index}"]`);
+  return (player === localSeat ? els.handList : els.opponentHandList).querySelector(`[data-index="${index}"]`);
 }
 
 function findInsertedIndex(prev, now) {
@@ -277,7 +378,7 @@ function stackTargetRects(assignments) {
     const r = els.boardContainer.querySelector(`[data-stack="${key}"]`).getBoundingClientRect();
     const off = STACK_OFFSET * s * (displayedStackCount(player, card) + seen[key]);
     const left = r.left + (r.width - w) / 2;
-    const top = player === HUMAN ? r.top + off : r.bottom - h - off;
+    const top = player === localSeat ? r.top + off : r.bottom - h - off;
     return new DOMRect(left, top, w, h);
   });
 }
@@ -291,23 +392,40 @@ function fitStage() {
 
 function updateTopBar() {
   els.roundBadge.textContent = `Round ${Game.state.round}`;
-  els.turnBadge.textContent = `Turn ${Math.min(Game.state.turnsTaken + 1, 8)} / 8`;
-  els.difficultyBadge.textContent = `${DIFF_LABELS[aiDifficulty]} AI`;
-  els.playerZone.classList.toggle('active', !Game.state.gameOver && Game.state.currentPlayer === HUMAN);
-  els.opponentZone.classList.toggle('active', !Game.state.gameOver && Game.state.currentPlayer === AI_PLAYER);
+  if (gameMode === 'online' && !Game.state.gameOver) {
+    const turnNum = Math.min(Game.state.turnsTaken + 1, 8);
+    const turnOwner = Game.state.currentPlayer === localSeat ? 'Your Turn' : "Opponent's Turn";
+    els.turnBadge.textContent = `Turn ${turnNum} / 8 · ${turnOwner}`;
+  } else {
+    els.turnBadge.textContent = `Turn ${Math.min(Game.state.turnsTaken + 1, 8)} / 8`;
+  }
+
+  if (gameMode === 'online') {
+    els.difficultyBadge.textContent = `Online · ${onlineRoomCode || ''}`;
+  } else {
+    els.difficultyBadge.textContent = `${DIFF_LABELS[aiDifficulty]} AI`;
+  }
+
+  els.opponentSecret.dataset.tip = gameMode === 'online' ? "Opponent's secret" : "Computer's secret";
+  els.opponentActions.setAttribute('aria-label', `${oppName()} actions remaining`);
+
+  els.playerZone.classList.toggle('active', !Game.state.gameOver && Game.state.currentPlayer === localSeat);
+  els.opponentZone.classList.toggle('active', !Game.state.gameOver && Game.state.currentPlayer === oppSeat());
 }
 
 function buildOpponentZone() {
-  const showSecret = Game.state.secretCard[AI_PLAYER] !== null && !(Game.state.gameOver && revealDone);
+  const opp = oppSeat();
+  const oppSecret = Game.state.secretCard[opp];
+  const showSecret = oppSecret !== null && oppSecret !== 0 && !(Game.state.gameOver && revealDone);
   els.opponentSecret.replaceChildren(
     showSecret ? makeCard(null, 'var(--h-opp)') : makeEmptySlot('var(--h-opp)')
   );
 
-  const oppHand = Game.getHand(AI_PLAYER);
+  const oppHand = Game.getHand(opp);
   const handNodes = oppHand.map((_, i) => {
     const c = makeCard(null, 'var(--h-opp)');
     c.dataset.index = String(i);
-    if (hiddenDraw && hiddenDraw.player === AI_PLAYER && hiddenDraw.index === i) {
+    if (hiddenDraw && hiddenDraw.player === opp && hiddenDraw.index === i) {
       c.style.visibility = 'hidden';
     }
     return c;
@@ -316,7 +434,7 @@ function buildOpponentZone() {
 
   const actionNodes = ACTIONS.map((a) => {
     const span = document.createElement('span');
-    if (Game.state.players[AI_PLAYER].actions[a] === false) {
+    if (Game.state.players[opp].actions[a] === false) {
       span.className = 'used';
     }
     span.innerHTML = iconSvg(a);
@@ -327,13 +445,14 @@ function buildOpponentZone() {
 
 function buildGiftStack(player, cardId) {
   const stack = document.createElement('div');
-  stack.className = 'gift-stack';
+  const isBottom = player === localSeat;
+  stack.className = `gift-stack ${isBottom ? 'stack-bottom' : 'stack-top'}`;
   stack.dataset.stack = `${player}-${cardId}`;
 
   const n = displayedStackCount(player, cardId);
   for (let i = 0; i < n; i++) {
     const c = makeCard(cardId, 'var(--h-gift)');
-    if (player === HUMAN) {
+    if (isBottom) {
       c.style.top = `${i * STACK_OFFSET}px`;
     } else {
       c.style.bottom = `${i * STACK_OFFSET}px`;
@@ -361,7 +480,7 @@ function buildBoard() {
     const col = document.createElement('div');
     col.className = 'geisha-column';
 
-    const topStack = buildGiftStack(AI_PLAYER, row.id);
+    const topStack = buildGiftStack(oppSeat(), row.id);
 
     const geisha = document.createElement('div');
     geisha.className = 'geisha-card';
@@ -370,12 +489,13 @@ function buildBoard() {
     const displayedOwner = Game.state.gameOver && !revealDone ? row.priorOwner : row.owner;
     if (displayedOwner !== 0) {
       const marker = document.createElement('div');
-      marker.className = `favor-marker ${displayedOwner === HUMAN ? 'favor-p1' : 'favor-p2'}`;
-      marker.textContent = displayedOwner === HUMAN ? '▼ You' : '▲ AI';
+      const isMine = displayedOwner === localSeat;
+      marker.className = `favor-marker ${isMine ? 'favor-p1' : 'favor-p2'}`;
+      marker.textContent = isMine ? '▼ You' : oppFavorTag();
       geisha.appendChild(marker);
     }
 
-    const bottomStack = buildGiftStack(HUMAN, row.id);
+    const bottomStack = buildGiftStack(localSeat, row.id);
 
     col.append(topStack, geisha, bottomStack);
     grid.appendChild(col);
@@ -405,8 +525,8 @@ function buildPiles() {
 }
 
 function buildPlayerZone() {
-  const secret = Game.state.secretCard[HUMAN];
-  if (secret !== null && !(Game.state.gameOver && revealDone)) {
+  const secret = Game.state.secretCard[localSeat];
+  if (secret !== null && secret !== 0 && !(Game.state.gameOver && revealDone)) {
     els.playerSecret.replaceChildren(
       makeCard(null, 'var(--h-hand)'),
       makeCard(secret, 'var(--h-hand)', 'peek')
@@ -415,8 +535,8 @@ function buildPlayerZone() {
     els.playerSecret.replaceChildren(makeEmptySlot('var(--h-hand)'));
   }
 
-  const hand = Game.getHand(HUMAN);
-  const selectable = !animating && !pendingOffer && !Game.state.gameOver && Game.state.currentPlayer === HUMAN && Boolean(pendingAction);
+  const hand = Game.getHand(localSeat);
+  const selectable = !animating && !pendingOffer && !Game.state.gameOver && Game.state.currentPlayer === localSeat && Boolean(pendingAction);
 
   const buttons = hand.map((card, index) => {
     const btn = document.createElement('button');
@@ -442,7 +562,7 @@ function buildPlayerZone() {
       }
     }
 
-    if (hiddenDraw && hiddenDraw.player === HUMAN && hiddenDraw.index === index) {
+    if (hiddenDraw && hiddenDraw.player === localSeat && hiddenDraw.index === index) {
       btn.style.visibility = 'hidden';
     }
 
@@ -453,7 +573,7 @@ function buildPlayerZone() {
 }
 
 function updateActionBar() {
-  const canAct = !animating && !pendingOffer && !Game.state.gameOver && Game.state.currentPlayer === HUMAN;
+  const canAct = !animating && !pendingOffer && !Game.state.gameOver && Game.state.currentPlayer === localSeat;
 
   els.actionBar.querySelectorAll('.action-btn').forEach((btn) => {
     if (!btn.dataset.baseTip) {
@@ -468,7 +588,7 @@ function updateActionBar() {
     }
 
     const a = btn.dataset.action;
-    const used = Game.state.players[HUMAN].actions[a] === false;
+    const used = Game.state.players[localSeat].actions[a] === false;
     btn.classList.toggle('used', used);
     btn.classList.toggle('armed', pendingAction?.type === a);
     btn.setAttribute('aria-disabled', String(used || !canAct));
@@ -491,7 +611,7 @@ function renderOfferTray() {
   els.boardRow.classList.add('offer-active');
   els.offerTray.style.setProperty(
     '--offer-color',
-    pendingOffer.offerer === HUMAN ? 'var(--player-color)' : 'var(--ai-color)'
+    pendingOffer.offerer === localSeat ? 'var(--player-color)' : 'var(--ai-color)'
   );
 
   const receiver = Game.other(pendingOffer.offerer);
@@ -500,9 +620,13 @@ function renderOfferTray() {
   const head = document.createElement('div');
   head.className = 'tray-head';
   head.innerHTML = iconSvg(pendingOffer.kind);
-  if (pendingOffer.interactive) {
+  if (pendingOffer.interactive || (gameMode === 'online' && pendingOffer.revealed && pendingOffer.chosen === null)) {
     const label = document.createElement('span');
-    label.textContent = pendingOffer.kind === 'gift' ? 'Pick a card' : 'Pick a pair';
+    if (pendingOffer.interactive) {
+      label.textContent = pendingOffer.kind === 'gift' ? 'Pick a card' : 'Pick a pair';
+    } else {
+      label.textContent = 'Opponent choosing…';
+    }
     head.appendChild(label);
 
     const peekBtn = document.createElement('button');
@@ -530,7 +654,7 @@ function renderOfferTray() {
       slot.className = 'tray-slot';
       slot.dataset.slot = String(k);
       if (pendingOffer.chosen === k) {
-        slot.classList.add(`chosen-${receiver}`);
+        slot.classList.add(`chosen-${receiver === localSeat ? 1 : 2}`);
       }
       if (pendingOffer.hidden.has(k)) {
         slot.style.visibility = 'hidden';
@@ -548,7 +672,7 @@ function renderOfferTray() {
       pair.className = 'tray-pair';
       pair.dataset.pair = String(p);
       if (pendingOffer.chosen === p) {
-        pair.classList.add(`chosen-${receiver}`);
+        pair.classList.add(`chosen-${receiver === localSeat ? 1 : 2}`);
       }
       for (const k of [p * 2, p * 2 + 1]) {
         const slot = document.createElement('div');
@@ -578,11 +702,14 @@ function buildResultPanel() {
   const result = Game.getResultSummary();
   const isTie = result.winner === 0;
 
-  const p1SecretName = result.player1.secretCard
-    ? `${CARD_ICONS[result.player1.secretCard]} ${Game.cardName(result.player1.secretCard)} (${Game.cardValue(result.player1.secretCard)} pts)`
+  const myResult = localSeat === 1 ? result.player1 : result.player2;
+  const oppResult = localSeat === 1 ? result.player2 : result.player1;
+
+  const mySecretName = myResult.secretCard
+    ? `${CARD_ICONS[myResult.secretCard]} ${Game.cardName(myResult.secretCard)} (${Game.cardValue(myResult.secretCard)} pts)`
     : 'None';
-  const p2SecretName = result.player2.secretCard
-    ? `${CARD_ICONS[result.player2.secretCard]} ${Game.cardName(result.player2.secretCard)} (${Game.cardValue(result.player2.secretCard)} pts)`
+  const oppSecretName = oppResult.secretCard
+    ? `${CARD_ICONS[oppResult.secretCard]} ${Game.cardName(oppResult.secretCard)} (${Game.cardValue(oppResult.secretCard)} pts)`
     : 'None';
 
   const headingText = isTie
@@ -590,15 +717,16 @@ function buildResultPanel() {
     : (result.round > 1 ? `Game Over · Round ${result.round}` : 'Game Over');
 
   let winnerText = '🤝 Tie round! Geisha favors carry over.';
-  if (result.winner === HUMAN) {
+  if (result.winner === localSeat) {
     winnerText = '🏆 You won!';
-  } else if (result.winner === AI_PLAYER) {
-    winnerText = '🤖 Computer won!';
+  } else if (result.winner === oppSeat()) {
+    winnerText = gameMode === 'online' ? '⚔️ Opponent won!' : '🤖 Computer won!';
   }
 
   const nextStarter = Game.other(result.roundStarter);
+  const nextStarterName = nextStarter === localSeat ? 'You go' : `${oppName()} goes`;
   const nextStarterNote = isTie
-    ? `<p class="result-sub">${nextStarter === HUMAN ? 'You go' : 'Computer goes'} first in Round ${result.round + 1}.</p>`
+    ? `<p class="result-sub">${nextStarterName} first in Round ${result.round + 1}.</p>`
     : '';
 
   const card = document.createElement('div');
@@ -610,15 +738,15 @@ function buildResultPanel() {
     <div class="result-stats">
       <div class="result-col">
         <h3>You</h3>
-        <p><strong>Charm Points:</strong> ${result.player1.score}</p>
-        <p><strong>Geishas Held:</strong> ${result.player1.geishaCount} / 7</p>
-        <p><strong>Revealed Secret:</strong> ${p1SecretName}</p>
+        <p><strong>Charm Points:</strong> ${myResult.score}</p>
+        <p><strong>Geishas Held:</strong> ${myResult.geishaCount} / 7</p>
+        <p><strong>Revealed Secret:</strong> ${mySecretName}</p>
       </div>
       <div class="result-col">
-        <h3>Computer</h3>
-        <p><strong>Charm Points:</strong> ${result.player2.score}</p>
-        <p><strong>Geishas Held:</strong> ${result.player2.geishaCount} / 7</p>
-        <p><strong>Revealed Secret:</strong> ${p2SecretName}</p>
+        <h3>${oppName()}</h3>
+        <p><strong>Charm Points:</strong> ${oppResult.score}</p>
+        <p><strong>Geishas Held:</strong> ${oppResult.geishaCount} / 7</p>
+        <p><strong>Revealed Secret:</strong> ${oppSecretName}</p>
       </div>
     </div>
   `;
@@ -633,32 +761,83 @@ function buildResultPanel() {
   peekBtn.setAttribute('aria-label', 'View board');
   peekBtn.innerHTML = `${iconSvg('eye')}<span>View Board</span>`;
 
-  const actionBtn = document.createElement('button');
-  actionBtn.className = 'primary restart-result-btn';
-  actionBtn.type = 'button';
-  if (isTie) {
-    actionBtn.textContent = `Start Round ${result.round + 1}`;
+  actionsRow.appendChild(peekBtn);
+
+  if (gameMode === 'online') {
+    const actionBtn = document.createElement('button');
+    actionBtn.className = 'primary restart-result-btn';
+    actionBtn.type = 'button';
+    actionBtn.textContent = isTie ? `Start Round ${result.round + 1}` : 'Rematch';
+
     actionBtn.addEventListener('click', () => {
       if (peekState !== 'closed') return;
-      beginNextRound();
+      localReadyNext = true;
+      actionBtn.textContent = 'Waiting for opponent…';
+      actionBtn.disabled = true;
+      netSession?.send({ type: 'ready_next', kind: isTie ? 'next_round' : 'rematch' });
+
+      if (remoteReadyNext && localSeat === 1) {
+        if (isTie) {
+          Game.startNextRound();
+          netSession.send({
+            type: 'round_start',
+            round: Game.state.round,
+            starter: Game.state.roundStarter,
+            view: Game.buildPlayerView(2)
+          });
+          beginOnlineNextRound();
+        } else {
+          Game.startGame(startingPlayerPref);
+          netSession.send({
+            type: 'round_start',
+            round: Game.state.round,
+            starter: Game.state.roundStarter,
+            view: Game.buildPlayerView(2)
+          });
+          beginOnlineNextRound();
+        }
+      }
     });
+
+    const leaveBtn = document.createElement('button');
+    leaveBtn.className = 'secondary restart-result-btn';
+    leaveBtn.type = 'button';
+    leaveBtn.textContent = 'Leave Room';
+    leaveBtn.addEventListener('click', () => {
+      if (peekState !== 'closed') return;
+      handleLeaveOnline();
+    });
+
+    actionsRow.append(actionBtn, leaveBtn);
   } else {
-    actionBtn.textContent = 'Play Again';
-    actionBtn.addEventListener('click', () => {
-      if (peekState !== 'closed') return;
-      showModeSelection();
-    });
+    const actionBtn = document.createElement('button');
+    actionBtn.className = 'primary restart-result-btn';
+    actionBtn.type = 'button';
+    if (isTie) {
+      actionBtn.textContent = `Start Round ${result.round + 1}`;
+      actionBtn.addEventListener('click', () => {
+        if (peekState !== 'closed') return;
+        beginNextRound();
+      });
+    } else {
+      actionBtn.textContent = 'Play Again';
+      actionBtn.addEventListener('click', () => {
+        if (peekState !== 'closed') return;
+        showModeSelection();
+      });
+    }
+    actionsRow.appendChild(actionBtn);
   }
 
-  actionsRow.append(peekBtn, actionBtn);
   card.appendChild(actionsRow);
   els.resultPanel.replaceChildren(card);
 }
 
 function buildHistoryItem(e, isNew) {
-  const who = e.player === HUMAN ? 'You' : 'Computer';
+  const isMe = e.player === localSeat;
+  const who = isMe ? 'You' : oppName();
   const li = document.createElement('li');
-  li.className = `history-item ${e.player === HUMAN ? 'by-player' : 'by-ai'}${isNew ? ' enter' : ''}`;
+  li.className = `history-item ${isMe ? 'by-player' : 'by-ai'}${isNew ? ' enter' : ''}`;
   li.setAttribute('aria-label', `${who}: ${ACTION_NAMES[e.action]}`);
   li.innerHTML = iconSvg(e.action);
 
@@ -671,7 +850,8 @@ function buildHistoryItem(e, isNew) {
   const row = document.createElement('div');
   row.className = 'history-pop-cards';
   e.cards.forEach((c) => {
-    row.appendChild(makeCard(c.card, '90px', `mini to-${c.to}`));
+    const toCls = c.to === localSeat ? 'to-1' : c.to === oppSeat() ? 'to-2' : `to-${c.to}`;
+    row.appendChild(makeCard(c.card, '90px', `mini ${toCls}`));
   });
 
   pop.append(header, row);
@@ -707,8 +887,8 @@ function render() {
 /* --- Input --- */
 
 function selectAction(type) {
-  if (animating || pendingOffer || Game.state.gameOver || Game.state.currentPlayer !== HUMAN) return;
-  if (!Game.canUseAction(HUMAN, type)) return;
+  if (animating || pendingOffer || Game.state.gameOver || Game.state.currentPlayer !== localSeat) return;
+  if (!Game.canUseAction(localSeat, type)) return;
   if (pendingAction?.type === type) {
     pendingAction = null;
     render();
@@ -724,7 +904,7 @@ function selectAction(type) {
 }
 
 function handleCardClick(index) {
-  if (animating || pendingOffer || !pendingAction || Game.state.gameOver || Game.state.currentPlayer !== HUMAN) return;
+  if (animating || pendingOffer || !pendingAction || Game.state.gameOver || Game.state.currentPlayer !== localSeat) return;
   const existing = pendingAction.selected.indexOf(index);
   if (existing >= 0) {
     pendingAction.selected.splice(existing, 1);
@@ -741,7 +921,11 @@ async function confirmSelection() {
   animating = true;
   updateActionBar();
   try {
-    await playHumanTurn(type, [...selected]);
+    if (gameMode === 'online') {
+      await playOnlineLocalTurn(type, [...selected]);
+    } else {
+      await playHumanTurn(type, [...selected]);
+    }
   } catch (err) {
     console.error(err);
     stopPeek(false);
@@ -1176,10 +1360,15 @@ async function afterCommit(prevNext, token) {
   await animateDraw(next, prevNext, token);
   if (token !== gameToken) return;
 
-  if (next === AI_PLAYER) {
-    await Fx.wait(500);
-    if (token !== gameToken) return;
-    await playAITurn(token);
+  if (gameMode === 'ai') {
+    if (next === AI_PLAYER) {
+      await Fx.wait(500);
+      if (token !== gameToken) return;
+      await playAITurn(token);
+    } else {
+      animating = false;
+      render();
+    }
   } else {
     animating = false;
     render();
@@ -1196,10 +1385,10 @@ async function animateDraw(player, prevHand, token) {
   await Fx.flyCard({
     from: deckRect,
     to: handEl(player, index).getBoundingClientRect(),
-    frontSrc: cardFront(now[index]),
+    frontSrc: player === localSeat ? cardFront(now[index]) : null,
     backSrc: CARD_BACK,
     startFaceUp: false,
-    endFaceUp: player === HUMAN,
+    endFaceUp: player === localSeat,
     duration: 450
   });
   if (token !== gameToken) return;
@@ -1208,14 +1397,15 @@ async function animateDraw(player, prevHand, token) {
 }
 
 async function animateReveal(token) {
-  const flights = [HUMAN, AI_PLAYER].map((p, n) => {
+  const flights = [localSeat, oppSeat()].map((p, n) => {
     const card = Game.state.secretCard[p];
-    if (card === null) return null;
-    const slotEl = p === HUMAN ? els.playerSecret : els.opponentSecret;
+    if (!card) return null;
+    const slotEl = p === localSeat ? els.playerSecret : els.opponentSecret;
     const slotCard = slotEl.querySelector('.card');
+    if (!slotCard) return null;
     const from = slotCard.getBoundingClientRect();
     const [to] = stackTargetRects([{ player: p, card }]);
-    slotEl.replaceChildren(makeEmptySlot(p === HUMAN ? 'var(--h-hand)' : 'var(--h-opp)'));
+    slotEl.replaceChildren(makeEmptySlot(p === localSeat ? 'var(--h-hand)' : 'var(--h-opp)'));
     return Fx.flyCard({
       from,
       to,
@@ -1231,11 +1421,925 @@ async function animateReveal(token) {
   await Promise.all(flights);
   if (token !== gameToken) return;
 
-  const aiSecret = history.find((h) => h.player === AI_PLAYER && h.action === 'secret');
-  if (aiSecret) {
-    aiSecret.cards[0].card = Game.state.secretCard[AI_PLAYER];
+  const oppSecretHistory = history.find((h) => h.player === oppSeat() && h.action === 'secret');
+  if (oppSecretHistory && Game.state.secretCard[oppSeat()]) {
+    oppSecretHistory.cards[0].card = Game.state.secretCard[oppSeat()];
     renderHistory(false);
   }
+}
+
+/* --- Online Networking Handlers & Turn Sequences --- */
+
+function waitForNetSignal(type) {
+  return new Promise((resolve) => {
+    if (!pendingSignals.has(type)) {
+      pendingSignals.set(type, []);
+    }
+    pendingSignals.get(type).push(resolve);
+  });
+}
+
+function resolveNetSignal(type, msg) {
+  const queue = pendingSignals.get(type);
+  if (queue && queue.length > 0) {
+    const resolve = queue.shift();
+    if (queue.length === 0) {
+      pendingSignals.delete(type);
+    }
+    resolve(msg);
+    return true;
+  }
+  return false;
+}
+
+function rejectAllNetSignals() {
+  pendingSignals.clear();
+}
+
+function enqueueNetTurn(fn) {
+  turnQueue = turnQueue.then(async () => {
+    try {
+      await fn();
+    } catch (err) {
+      console.error('Net turn error:', err);
+    }
+  });
+  return turnQueue;
+}
+
+async function playOnlineLocalTurn(type, selected) {
+  const token = gameToken;
+  const hand = Game.getHand(localSeat);
+
+  if (localSeat === 1) {
+    // HOST local turn
+    const prevNext = Game.getHand(2);
+
+    if (type === 'secret') {
+      const idx = selected[0];
+      const card = hand[idx];
+      const src = handEl(1, idx);
+      const from = Fx.rectOf(src);
+      const to = Fx.rectOf(els.playerSecret.firstElementChild);
+      src.style.visibility = 'hidden';
+
+      netSession.send({ type: 'remote_secret', selected: [idx] });
+
+      await Fx.flyCard({
+        from,
+        to,
+        frontSrc: cardFront(card),
+        backSrc: CARD_BACK,
+        startFaceUp: true,
+        endFaceUp: false
+      });
+      if (token !== gameToken) return;
+
+      Game.performSecret(1, idx);
+      netSession.send({ type: 'turn_commit', view: Game.buildPlayerView(2) });
+      pushHistory({ player: 1, action: 'secret', cards: [{ card, to: 'secret' }] });
+      await afterCommit(prevNext, token);
+      return;
+    }
+
+    if (type === 'tradeoff') {
+      const sel = [...selected];
+      const cards = sel.map((i) => hand[i]);
+      const froms = sel.map((i) => Fx.rectOf(handEl(1, i)));
+      const to = Fx.rectOf(els.discardPile);
+      sel.forEach((i) => { handEl(1, i).style.visibility = 'hidden'; });
+
+      netSession.send({ type: 'remote_tradeoff', selected: sel });
+
+      await Promise.all(cards.map((card, k) => Fx.flyCard({
+        from: froms[k],
+        to,
+        frontSrc: cardFront(card),
+        backSrc: CARD_BACK,
+        startFaceUp: true,
+        endFaceUp: false,
+        delay: k * 120
+      })));
+      if (token !== gameToken) return;
+
+      Game.performTradeoff(1, sel);
+      netSession.send({ type: 'turn_commit', view: Game.buildPlayerView(2) });
+      pushHistory({
+        player: 1,
+        action: 'tradeoff',
+        cards: cards.map((card) => ({ card, to: 'discard' }))
+      });
+      await afterCommit(prevNext, token);
+      return;
+    }
+
+    if (type === 'gift') {
+      const sel = [...selected].sort((a, b) => a - b);
+      const cards = sel.map((i) => hand[i]);
+      pendingOffer = {
+        kind: 'gift',
+        offerer: 1,
+        cards,
+        revealed: false,
+        interactive: false,
+        chosen: null,
+        hidden: new Set(),
+        resolve: null
+      };
+      renderOfferTray();
+
+      const responsePromise = waitForNetSignal('offer_response');
+      netSession.send({ type: 'offer_made', kind: 'gift', selected: sel, cards });
+
+      const froms = sel.map((i) => Fx.rectOf(handEl(1, i)));
+      const tos = cards.map((_, k) => Fx.rectOf(els.offerTray.querySelector(`[data-slot="${k}"]`)));
+      sel.forEach((i) => { handEl(1, i).style.visibility = 'hidden'; });
+
+      const clones = await Promise.all(cards.map((card, k) => Fx.flyCard({
+        from: froms[k],
+        to: tos[k],
+        frontSrc: cardFront(card),
+        backSrc: CARD_BACK,
+        startFaceUp: true,
+        endFaceUp: true,
+        delay: k * 90,
+        keep: true
+      })));
+      if (token !== gameToken) return;
+
+      pendingOffer.revealed = true;
+      renderOfferTray();
+      clones.forEach((c) => c.remove());
+
+      const { choice } = await responsePromise;
+      if (token !== gameToken) return;
+
+      pendingOffer.chosen = choice;
+      renderOfferTray();
+
+      await Fx.wait(350);
+      if (token !== gameToken) return;
+
+      const assign = cards.map((_, k) => (k === choice ? 2 : 1));
+      await distributeOffer(assign);
+      if (token !== gameToken) return;
+
+      pendingOffer = null;
+      Game.performGift(1, sel, choice);
+      netSession.send({ type: 'turn_commit', view: Game.buildPlayerView(2) });
+      pushHistory({
+        player: 1,
+        action: 'gift',
+        cards: cards.map((card, k) => ({ card, to: assign[k] }))
+      });
+      await afterCommit(prevNext, token);
+      return;
+    }
+
+    if (type === 'competition') {
+      const sel = [...selected];
+      const cards = sel.map((i) => hand[i]);
+      pendingOffer = {
+        kind: 'competition',
+        offerer: 1,
+        cards,
+        revealed: false,
+        interactive: false,
+        chosen: null,
+        hidden: new Set(),
+        resolve: null
+      };
+      renderOfferTray();
+
+      const responsePromise = waitForNetSignal('offer_response');
+      netSession.send({ type: 'offer_made', kind: 'competition', selected: sel, cards });
+
+      const froms = sel.map((i) => Fx.rectOf(handEl(1, i)));
+      const tos = cards.map((_, k) => Fx.rectOf(els.offerTray.querySelector(`[data-slot="${k}"]`)));
+      sel.forEach((i) => { handEl(1, i).style.visibility = 'hidden'; });
+
+      const clones = await Promise.all(cards.map((card, k) => Fx.flyCard({
+        from: froms[k],
+        to: tos[k],
+        frontSrc: cardFront(card),
+        backSrc: CARD_BACK,
+        startFaceUp: true,
+        endFaceUp: true,
+        delay: k * 90,
+        keep: true
+      })));
+      if (token !== gameToken) return;
+
+      pendingOffer.revealed = true;
+      renderOfferTray();
+      clones.forEach((c) => c.remove());
+
+      const { choice } = await responsePromise;
+      if (token !== gameToken) return;
+
+      pendingOffer.chosen = choice;
+      renderOfferTray();
+
+      await Fx.wait(350);
+      if (token !== gameToken) return;
+
+      const assign = cards.map((_, k) => (Math.floor(k / 2) === choice ? 2 : 1));
+      await distributeOffer(assign);
+      if (token !== gameToken) return;
+
+      pendingOffer = null;
+      Game.performCompetition(1, sel, choice + 1);
+      netSession.send({ type: 'turn_commit', view: Game.buildPlayerView(2) });
+      pushHistory({
+        player: 1,
+        action: 'competition',
+        cards: cards.map((card, k) => ({ card, to: assign[k] }))
+      });
+      await afterCommit(prevNext, token);
+    }
+  } else {
+    // GUEST local turn (localSeat === 2)
+    if (type === 'secret') {
+      const idx = selected[0];
+      const card = hand[idx];
+      const src = handEl(2, idx);
+      const from = Fx.rectOf(src);
+      const to = Fx.rectOf(els.playerSecret.firstElementChild);
+      src.style.visibility = 'hidden';
+
+      const commitPromise = waitForNetSignal('turn_commit');
+      netSession.send({ type: 'action_intent', action: 'secret', selected: [idx] });
+
+      await Fx.flyCard({
+        from,
+        to,
+        frontSrc: cardFront(card),
+        backSrc: CARD_BACK,
+        startFaceUp: true,
+        endFaceUp: false
+      });
+      if (token !== gameToken) return;
+
+      const commit = await commitPromise;
+      if (token !== gameToken) return;
+
+      const prevNext = Game.getHand(1);
+      Game.applyPlayerView(commit.view);
+      pushHistory({ player: 2, action: 'secret', cards: [{ card, to: 'secret' }] });
+      await afterCommit(prevNext, token);
+      return;
+    }
+
+    if (type === 'tradeoff') {
+      const sel = [...selected];
+      const cards = sel.map((i) => hand[i]);
+      const froms = sel.map((i) => Fx.rectOf(handEl(2, i)));
+      const to = Fx.rectOf(els.discardPile);
+      sel.forEach((i) => { handEl(2, i).style.visibility = 'hidden'; });
+
+      const commitPromise = waitForNetSignal('turn_commit');
+      netSession.send({ type: 'action_intent', action: 'tradeoff', selected: sel });
+
+      await Promise.all(cards.map((card, k) => Fx.flyCard({
+        from: froms[k],
+        to,
+        frontSrc: cardFront(card),
+        backSrc: CARD_BACK,
+        startFaceUp: true,
+        endFaceUp: false,
+        delay: k * 120
+      })));
+      if (token !== gameToken) return;
+
+      const commit = await commitPromise;
+      if (token !== gameToken) return;
+
+      const prevNext = Game.getHand(1);
+      Game.applyPlayerView(commit.view);
+      pushHistory({
+        player: 2,
+        action: 'tradeoff',
+        cards: cards.map((card) => ({ card, to: 'discard' }))
+      });
+      await afterCommit(prevNext, token);
+      return;
+    }
+
+    if (type === 'gift') {
+      const sel = [...selected].sort((a, b) => a - b);
+      const cards = sel.map((i) => hand[i]);
+      pendingOffer = {
+        kind: 'gift',
+        offerer: 2,
+        cards,
+        revealed: false,
+        interactive: false,
+        chosen: null,
+        hidden: new Set(),
+        resolve: null
+      };
+      renderOfferTray();
+
+      const choicePromise = waitForNetSignal('offer_choice');
+      const commitPromise = waitForNetSignal('turn_commit');
+      netSession.send({ type: 'offer_intent', kind: 'gift', selected: sel, cards });
+
+      const froms = sel.map((i) => Fx.rectOf(handEl(2, i)));
+      const tos = cards.map((_, k) => Fx.rectOf(els.offerTray.querySelector(`[data-slot="${k}"]`)));
+      sel.forEach((i) => { handEl(2, i).style.visibility = 'hidden'; });
+
+      const clones = await Promise.all(cards.map((card, k) => Fx.flyCard({
+        from: froms[k],
+        to: tos[k],
+        frontSrc: cardFront(card),
+        backSrc: CARD_BACK,
+        startFaceUp: true,
+        endFaceUp: true,
+        delay: k * 90,
+        keep: true
+      })));
+      if (token !== gameToken) return;
+
+      pendingOffer.revealed = true;
+      renderOfferTray();
+      clones.forEach((c) => c.remove());
+
+      const { choice } = await choicePromise;
+      if (token !== gameToken) return;
+
+      pendingOffer.chosen = choice;
+      renderOfferTray();
+
+      await Fx.wait(350);
+      if (token !== gameToken) return;
+
+      const assign = cards.map((_, k) => (k === choice ? 1 : 2));
+      await distributeOffer(assign);
+      if (token !== gameToken) return;
+
+      pendingOffer = null;
+      const commit = await commitPromise;
+      if (token !== gameToken) return;
+
+      const prevNext = Game.getHand(1);
+      Game.applyPlayerView(commit.view);
+      pushHistory({
+        player: 2,
+        action: 'gift',
+        cards: cards.map((card, k) => ({ card, to: assign[k] }))
+      });
+      await afterCommit(prevNext, token);
+      return;
+    }
+
+    if (type === 'competition') {
+      const sel = [...selected];
+      const cards = sel.map((i) => hand[i]);
+      pendingOffer = {
+        kind: 'competition',
+        offerer: 2,
+        cards,
+        revealed: false,
+        interactive: false,
+        chosen: null,
+        hidden: new Set(),
+        resolve: null
+      };
+      renderOfferTray();
+
+      const choicePromise = waitForNetSignal('offer_choice');
+      const commitPromise = waitForNetSignal('turn_commit');
+      netSession.send({ type: 'offer_intent', kind: 'competition', selected: sel, cards });
+
+      const froms = sel.map((i) => Fx.rectOf(handEl(2, i)));
+      const tos = cards.map((_, k) => Fx.rectOf(els.offerTray.querySelector(`[data-slot="${k}"]`)));
+      sel.forEach((i) => { handEl(2, i).style.visibility = 'hidden'; });
+
+      const clones = await Promise.all(cards.map((card, k) => Fx.flyCard({
+        from: froms[k],
+        to: tos[k],
+        frontSrc: cardFront(card),
+        backSrc: CARD_BACK,
+        startFaceUp: true,
+        endFaceUp: true,
+        delay: k * 90,
+        keep: true
+      })));
+      if (token !== gameToken) return;
+
+      pendingOffer.revealed = true;
+      renderOfferTray();
+      clones.forEach((c) => c.remove());
+
+      const { choice } = await choicePromise;
+      if (token !== gameToken) return;
+
+      pendingOffer.chosen = choice;
+      renderOfferTray();
+
+      await Fx.wait(350);
+      if (token !== gameToken) return;
+
+      const assign = cards.map((_, k) => (Math.floor(k / 2) === choice ? 1 : 2));
+      await distributeOffer(assign);
+      if (token !== gameToken) return;
+
+      pendingOffer = null;
+      const commit = await commitPromise;
+      if (token !== gameToken) return;
+
+      const prevNext = Game.getHand(1);
+      Game.applyPlayerView(commit.view);
+      pushHistory({
+        player: 2,
+        action: 'competition',
+        cards: cards.map((card, k) => ({ card, to: assign[k] }))
+      });
+      await afterCommit(prevNext, token);
+    }
+  }
+}
+
+async function handleRemoteSecret(msg) {
+  const token = gameToken;
+  const idx = msg.selected[0];
+  const src = handEl(1, idx);
+  const from = Fx.rectOf(src);
+  const to = Fx.rectOf(els.opponentSecret.firstElementChild);
+  src.style.visibility = 'hidden';
+
+  await Fx.flyCard({
+    from,
+    to,
+    frontSrc: null,
+    backSrc: CARD_BACK,
+    startFaceUp: false,
+    endFaceUp: false
+  });
+  if (token !== gameToken) return;
+
+  const commit = await waitForNetSignal('turn_commit');
+  if (token !== gameToken) return;
+
+  const prevNext = Game.getHand(2);
+  Game.applyPlayerView(commit.view);
+  pushHistory({ player: 1, action: 'secret', cards: [{ card: null, to: 'secret' }] });
+  await afterCommit(prevNext, token);
+}
+
+async function handleRemoteTradeoff(msg) {
+  const token = gameToken;
+  const sel = msg.selected;
+  const froms = sel.map((i) => Fx.rectOf(handEl(1, i)));
+  const to = Fx.rectOf(els.discardPile);
+  sel.forEach((i) => { handEl(1, i).style.visibility = 'hidden'; });
+
+  await Promise.all(sel.map((_, k) => Fx.flyCard({
+    from: froms[k],
+    to,
+    frontSrc: null,
+    backSrc: CARD_BACK,
+    startFaceUp: false,
+    endFaceUp: false,
+    delay: k * 120
+  })));
+  if (token !== gameToken) return;
+
+  const commit = await waitForNetSignal('turn_commit');
+  if (token !== gameToken) return;
+
+  const prevNext = Game.getHand(2);
+  Game.applyPlayerView(commit.view);
+  pushHistory({
+    player: 1,
+    action: 'tradeoff',
+    cards: sel.map(() => ({ card: null, to: 'discard' }))
+  });
+  await afterCommit(prevNext, token);
+}
+
+async function handleRemoteOfferMade(msg) {
+  const token = gameToken;
+  const { kind, selected, cards } = msg;
+  pendingOffer = {
+    kind,
+    offerer: 1,
+    cards,
+    revealed: false,
+    interactive: false,
+    chosen: null,
+    hidden: new Set(),
+    resolve: null
+  };
+  renderOfferTray();
+
+  const froms = selected.map((i) => Fx.rectOf(handEl(1, i)));
+  const tos = cards.map((_, k) => Fx.rectOf(els.offerTray.querySelector(`[data-slot="${k}"]`)));
+  selected.forEach((i) => { handEl(1, i).style.visibility = 'hidden'; });
+
+  const clones = await Promise.all(cards.map((card, k) => Fx.flyCard({
+    from: froms[k],
+    to: tos[k],
+    frontSrc: cardFront(card),
+    backSrc: CARD_BACK,
+    startFaceUp: false,
+    endFaceUp: true,
+    delay: k * 90,
+    keep: true
+  })));
+  if (token !== gameToken) return;
+
+  pendingOffer.revealed = true;
+  renderOfferTray();
+  clones.forEach((c) => c.remove());
+
+  const commitPromise = waitForNetSignal('turn_commit');
+  const choice = await awaitHumanChoice();
+  if (token !== gameToken) return;
+
+  netSession.send({ type: 'offer_response', choice });
+  pendingOffer.chosen = choice;
+  renderOfferTray();
+
+  await Fx.wait(250);
+  if (token !== gameToken) return;
+
+  const assign = kind === 'gift'
+    ? cards.map((_, k) => (k === choice ? 2 : 1))
+    : cards.map((_, k) => (Math.floor(k / 2) === choice ? 2 : 1));
+  await distributeOffer(assign);
+  if (token !== gameToken) return;
+
+  pendingOffer = null;
+  const commit = await commitPromise;
+  if (token !== gameToken) return;
+
+  const prevNext = Game.getHand(2);
+  Game.applyPlayerView(commit.view);
+  pushHistory({
+    player: 1,
+    action: kind,
+    cards: cards.map((card, k) => ({ card, to: assign[k] }))
+  });
+  await afterCommit(prevNext, token);
+}
+
+async function handleActionIntent(msg) {
+  const token = gameToken;
+  const { action, selected } = msg;
+  const prevNext = Game.getHand(2);
+
+  if (action === 'secret') {
+    const idx = selected[0];
+    const src = handEl(2, idx);
+    const from = Fx.rectOf(src);
+    const to = Fx.rectOf(els.opponentSecret.firstElementChild);
+    src.style.visibility = 'hidden';
+
+    await Fx.flyCard({
+      from,
+      to,
+      frontSrc: null,
+      backSrc: CARD_BACK,
+      startFaceUp: false,
+      endFaceUp: false
+    });
+    if (token !== gameToken) return;
+
+    Game.performSecret(2, idx);
+    netSession.send({ type: 'turn_commit', view: Game.buildPlayerView(2) });
+    pushHistory({ player: 2, action: 'secret', cards: [{ card: null, to: 'secret' }] });
+    await afterCommit(prevNext, token);
+    return;
+  }
+
+  if (action === 'tradeoff') {
+    const sel = [...selected];
+    const froms = sel.map((i) => Fx.rectOf(handEl(2, i)));
+    const to = Fx.rectOf(els.discardPile);
+    sel.forEach((i) => { handEl(2, i).style.visibility = 'hidden'; });
+
+    await Promise.all(sel.map((_, k) => Fx.flyCard({
+      from: froms[k],
+      to,
+      frontSrc: null,
+      backSrc: CARD_BACK,
+      startFaceUp: false,
+      endFaceUp: false,
+      delay: k * 120
+    })));
+    if (token !== gameToken) return;
+
+    Game.performTradeoff(2, sel);
+    netSession.send({ type: 'turn_commit', view: Game.buildPlayerView(2) });
+    pushHistory({
+      player: 2,
+      action: 'tradeoff',
+      cards: sel.map(() => ({ card: null, to: 'discard' }))
+    });
+    await afterCommit(prevNext, token);
+  }
+}
+
+async function handleOfferIntent(msg) {
+  const token = gameToken;
+  const { kind, selected, cards } = msg;
+  const prevNext = Game.getHand(2);
+
+  pendingOffer = {
+    kind,
+    offerer: 2,
+    cards,
+    revealed: false,
+    interactive: false,
+    chosen: null,
+    hidden: new Set(),
+    resolve: null
+  };
+  renderOfferTray();
+
+  const froms = selected.map((i) => Fx.rectOf(handEl(2, i)));
+  const tos = cards.map((_, k) => Fx.rectOf(els.offerTray.querySelector(`[data-slot="${k}"]`)));
+  selected.forEach((i) => { handEl(2, i).style.visibility = 'hidden'; });
+
+  const clones = await Promise.all(cards.map((card, k) => Fx.flyCard({
+    from: froms[k],
+    to: tos[k],
+    frontSrc: cardFront(card),
+    backSrc: CARD_BACK,
+    startFaceUp: false,
+    endFaceUp: true,
+    delay: k * 90,
+    keep: true
+  })));
+  if (token !== gameToken) return;
+
+  pendingOffer.revealed = true;
+  renderOfferTray();
+  clones.forEach((c) => c.remove());
+
+  const choice = await awaitHumanChoice();
+  if (token !== gameToken) return;
+
+  netSession.send({ type: 'offer_choice', choice });
+  pendingOffer.chosen = choice;
+  renderOfferTray();
+
+  await Fx.wait(250);
+  if (token !== gameToken) return;
+
+  const assign = kind === 'gift'
+    ? cards.map((_, k) => (k === choice ? 1 : 2))
+    : cards.map((_, k) => (Math.floor(k / 2) === choice ? 1 : 2));
+  await distributeOffer(assign);
+  if (token !== gameToken) return;
+
+  pendingOffer = null;
+  if (kind === 'gift') {
+    Game.performGift(2, selected, choice);
+  } else {
+    Game.performCompetition(2, selected, choice + 1);
+  }
+
+  netSession.send({ type: 'turn_commit', view: Game.buildPlayerView(2) });
+  pushHistory({
+    player: 2,
+    action: kind,
+    cards: cards.map((card, k) => ({ card, to: assign[k] }))
+  });
+  await afterCommit(prevNext, token);
+}
+
+function handleNetMessage(msg) {
+  if (!msg || typeof msg !== 'object') return;
+
+  if (msg.type === 'round_start') {
+    enqueueNetTurn(async () => {
+      gameMode = 'online';
+      localSeat = 2;
+      gameStarted = true;
+      closeConfirmModal();
+      resetUIState();
+      els.modeSelectionScreen.classList.add('hidden');
+
+      Game.applyPlayerView(msg.view);
+      await kickoffOnlineRound();
+    });
+    return;
+  }
+
+  if (msg.type === 'ready_next') {
+    remoteReadyNext = true;
+    if (localReadyNext && localSeat === 1) {
+      if (msg.kind === 'next_round') {
+        Game.startNextRound();
+        netSession.send({
+          type: 'round_start',
+          round: Game.state.round,
+          starter: Game.state.roundStarter,
+          view: Game.buildPlayerView(2)
+        });
+        beginOnlineNextRound();
+      } else if (msg.kind === 'rematch') {
+        Game.startGame(startingPlayerPref);
+        netSession.send({
+          type: 'round_start',
+          round: Game.state.round,
+          starter: Game.state.roundStarter,
+          view: Game.buildPlayerView(2)
+        });
+        beginOnlineNextRound();
+      }
+    }
+    return;
+  }
+
+  if (msg.type === 'turn_commit') {
+    resolveNetSignal('turn_commit', msg);
+    return;
+  }
+
+  if (msg.type === 'offer_response') {
+    resolveNetSignal('offer_response', msg);
+    return;
+  }
+
+  if (msg.type === 'offer_choice') {
+    resolveNetSignal('offer_choice', msg);
+    return;
+  }
+
+  if (msg.type === 'remote_secret') {
+    enqueueNetTurn(() => handleRemoteSecret(msg));
+    return;
+  }
+
+  if (msg.type === 'remote_tradeoff') {
+    enqueueNetTurn(() => handleRemoteTradeoff(msg));
+    return;
+  }
+
+  if (msg.type === 'offer_made') {
+    enqueueNetTurn(() => handleRemoteOfferMade(msg));
+    return;
+  }
+
+  if (msg.type === 'action_intent') {
+    enqueueNetTurn(() => handleActionIntent(msg));
+    return;
+  }
+
+  if (msg.type === 'offer_intent') {
+    enqueueNetTurn(() => handleOfferIntent(msg));
+  }
+}
+
+function handleNetGuestJoined({ roomCode }) {
+  gameMode = 'online';
+  localSeat = 1;
+  gameStarted = true;
+  closeConfirmModal();
+  resetUIState();
+  els.modeSelectionScreen.classList.add('hidden');
+
+  Game.startGame(startingPlayerPref);
+
+  const view = Game.buildPlayerView(2);
+  netSession.send({
+    type: 'round_start',
+    round: Game.state.round,
+    starter: Game.state.roundStarter,
+    view
+  });
+
+  kickoffOnlineRound();
+}
+
+function handleNetJoinedHost() {
+  els.joinStatusMsg.textContent = 'Joined room! Waiting for host to start…';
+}
+
+function handleNetPeerLeft() {
+  if (gameStarted && gameMode === 'online') {
+    gameStarted = false;
+    openDisconnectModal('Your opponent left the match or lost connection.');
+  }
+}
+
+async function handleCreateRoomClick() {
+  if (onlineBusy) return;
+  onlineBusy = true;
+  els.createRoomButton.disabled = true;
+  els.hostLobbyStatus.textContent = 'Contacting signaling server…';
+  els.hostLobbyStatus.classList.remove('error');
+
+  try {
+    netSession = Net.createNetSession({
+      onGuestJoined: handleNetGuestJoined,
+      onJoinedHost: null,
+      onMessage: handleNetMessage,
+      onPeerLeft: handleNetPeerLeft,
+      onError: (err) => {
+        console.error('Net error:', err);
+      }
+    });
+
+    const { roomCode } = await netSession.hostRoom();
+    onlineRoomCode = roomCode;
+    els.lobbyRoomCode.textContent = roomCode;
+    els.createRoomButton.classList.add('hidden');
+    els.hostLobbyBox.classList.remove('hidden');
+    els.hostLobbyStatus.textContent = 'Waiting for opponent to join…';
+  } catch (err) {
+    console.error(err);
+    els.hostLobbyStatus.textContent = err.message || 'Failed to create room.';
+    els.hostLobbyStatus.classList.add('error');
+    els.createRoomButton.classList.remove('hidden');
+    els.hostLobbyBox.classList.add('hidden');
+    if (netSession) {
+      netSession.close(false);
+      netSession = null;
+    }
+  } finally {
+    onlineBusy = false;
+    els.createRoomButton.disabled = false;
+  }
+}
+
+function handleCancelRoomClick() {
+  if (netSession) {
+    netSession.close(false);
+    netSession = null;
+  }
+  onlineRoomCode = null;
+  els.hostLobbyBox.classList.add('hidden');
+  els.createRoomButton.classList.remove('hidden');
+}
+
+async function handleJoinRoomClick() {
+  if (onlineBusy) return;
+  const rawCode = els.joinCodeInput.value;
+  const code = Net.normalizeRoomCode(rawCode);
+  if (!Net.isValidRoomCode(code)) {
+    els.joinStatusMsg.textContent = 'Please enter a 6-character room code.';
+    els.joinStatusMsg.classList.remove('hidden');
+    els.joinStatusMsg.classList.add('error');
+    return;
+  }
+
+  onlineBusy = true;
+  els.joinRoomButton.disabled = true;
+  els.cancelJoinButton.classList.remove('hidden');
+  els.joinStatusMsg.textContent = `Connecting to room ${code}…`;
+  els.joinStatusMsg.classList.remove('hidden', 'error');
+
+  try {
+    netSession = Net.createNetSession({
+      onGuestJoined: null,
+      onJoinedHost: handleNetJoinedHost,
+      onMessage: handleNetMessage,
+      onPeerLeft: handleNetPeerLeft,
+      onError: (err) => {
+        console.error('Net error:', err);
+      }
+    });
+
+    await netSession.joinRoom(code);
+    onlineRoomCode = code;
+    els.joinStatusMsg.textContent = 'Connected! Waiting for match to start…';
+  } catch (err) {
+    console.error(err);
+    els.joinStatusMsg.textContent = err.message || 'Failed to join room.';
+    els.joinStatusMsg.classList.add('error');
+    if (netSession) {
+      netSession.close(false);
+      netSession = null;
+    }
+  } finally {
+    onlineBusy = false;
+    els.joinRoomButton.disabled = false;
+    els.cancelJoinButton.classList.add('hidden');
+  }
+}
+
+function handleCancelJoinClick() {
+  if (netSession) {
+    netSession.close(false);
+    netSession = null;
+  }
+  onlineRoomCode = null;
+  els.joinStatusMsg.classList.add('hidden');
+  els.joinRoomButton.disabled = false;
+  els.cancelJoinButton.classList.add('hidden');
+  onlineBusy = false;
+}
+
+function handleLeaveOnline() {
+  if (netSession) {
+    netSession.close(true);
+    netSession = null;
+  }
+  showModeSelection();
 }
 
 /* --- Lifecycle --- */
@@ -1251,6 +2355,9 @@ function resetUIState() {
   hiddenDraw = null;
   revealDone = false;
   resultReady = false;
+  localReadyNext = false;
+  remoteReadyNext = false;
+  rejectAllNetSignals();
 }
 
 async function kickoffRound() {
@@ -1277,9 +2384,22 @@ async function kickoffRound() {
   }
 }
 
+async function kickoffOnlineRound() {
+  renderHistory(false);
+  render();
+}
+
 function showModeSelection() {
   gameStarted = false;
+  gameMode = 'ai';
+  localSeat = 1;
+  if (netSession) {
+    netSession.close(false);
+    netSession = null;
+  }
+  onlineRoomCode = null;
   closeConfirmModal();
+  closeDisconnectModal();
   resetUIState();
   Game.resetGame();
   updateSetupSelectionUI();
@@ -1291,6 +2411,8 @@ function showModeSelection() {
 async function startNewGame() {
   closeConfirmModal();
   resetUIState();
+  gameMode = 'ai';
+  localSeat = 1;
   gameStarted = true;
   els.modeSelectionScreen.classList.add('hidden');
   Game.startGame(startingPlayerPref);
@@ -1306,6 +2428,13 @@ async function beginNextRound() {
   await kickoffRound();
 }
 
+async function beginOnlineNextRound() {
+  closeConfirmModal();
+  resetUIState();
+  gameStarted = true;
+  await kickoffOnlineRound();
+}
+
 function handleRestartClick() {
   if (gameStarted) {
     openConfirmModal();
@@ -1317,7 +2446,33 @@ function handleRestartClick() {
 export function startApp() {
   fitStage();
   window.addEventListener('resize', fitStage);
+
+  const params = new URLSearchParams(window.location.search);
+  const roomParam = params.get('room');
+  if (roomParam && Net.isValidRoomCode(Net.normalizeRoomCode(roomParam))) {
+    setupMode = 'online';
+    onlineTab = 'join';
+    els.joinCodeInput.value = Net.normalizeRoomCode(roomParam);
+    try {
+      window.history.replaceState({}, '', window.location.pathname);
+    } catch (_) {}
+  }
+
   showModeSelection();
+
+  els.gameModeButtons.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-mode]');
+    if (!btn) return;
+    setupMode = btn.dataset.mode;
+    updateSetupSelectionUI();
+  });
+
+  els.onlineRoleTabs.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-online-tab]');
+    if (!btn) return;
+    onlineTab = btn.dataset.onlineTab;
+    updateSetupSelectionUI();
+  });
 
   els.difficultyButtons.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-diff]');
@@ -1337,10 +2492,62 @@ export function startApp() {
   els.startGameButton.addEventListener('click', () => startNewGame());
   els.restartButton.addEventListener('click', handleRestartClick);
 
+  els.createRoomButton.addEventListener('click', handleCreateRoomClick);
+  els.cancelRoomButton.addEventListener('click', handleCancelRoomClick);
+  els.copyCodeButton.addEventListener('click', async () => {
+    if (!onlineRoomCode) return;
+    try {
+      await navigator.clipboard.writeText(onlineRoomCode);
+      const prev = els.copyCodeButton.textContent;
+      els.copyCodeButton.textContent = 'Copied!';
+      setTimeout(() => { els.copyCodeButton.textContent = prev; }, 1500);
+    } catch (_) {}
+  });
+  els.copyLinkButton.addEventListener('click', async () => {
+    if (!onlineRoomCode) return;
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('room', onlineRoomCode);
+      await navigator.clipboard.writeText(url.toString());
+      const prev = els.copyLinkButton.textContent;
+      els.copyLinkButton.textContent = 'Link Copied!';
+      setTimeout(() => { els.copyLinkButton.textContent = prev; }, 1500);
+    } catch (_) {}
+  });
+
+  els.joinRoomButton.addEventListener('click', handleJoinRoomClick);
+  els.cancelJoinButton.addEventListener('click', handleCancelJoinClick);
+  els.joinCodeInput.addEventListener('input', () => {
+    els.joinCodeInput.value = Net.normalizeRoomCode(els.joinCodeInput.value);
+  });
+  els.joinCodeInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleJoinRoomClick();
+    }
+  });
+
   els.confirmCancelButton.addEventListener('click', closeConfirmModal);
-  els.confirmAcceptButton.addEventListener('click', () => showModeSelection());
+  els.confirmAcceptButton.addEventListener('click', () => {
+    if (gameMode === 'online') {
+      handleLeaveOnline();
+    } else {
+      showModeSelection();
+    }
+  });
   els.confirmModal.addEventListener('click', (e) => {
     if (e.target === els.confirmModal) closeConfirmModal();
+  });
+
+  els.disconnectOkButton.addEventListener('click', () => {
+    closeDisconnectModal();
+    showModeSelection();
+  });
+  els.disconnectModal.addEventListener('click', (e) => {
+    if (e.target === els.disconnectModal) {
+      closeDisconnectModal();
+      showModeSelection();
+    }
   });
 
   els.actionBar.addEventListener('click', (e) => {
@@ -1375,7 +2582,7 @@ export function startApp() {
     const btn = e.target.closest('.peek-trigger-btn');
     if (!btn) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
-    if (!canPeekBoard() || isConfirmModalOpen()) return;
+    if (!canPeekBoard() || isConfirmModalOpen() || isDisconnectModalOpen()) return;
     beginPeekHold(e.pointerId);
   });
 
@@ -1389,7 +2596,7 @@ export function startApp() {
     const btn = e.target.closest('.peek-trigger-btn');
     if (!btn) return;
     if (performance.now() < suppressTriggerClickUntil) return;
-    if (!canPeekBoard() || isConfirmModalOpen()) return;
+    if (!canPeekBoard() || isConfirmModalOpen() || isDisconnectModalOpen()) return;
     latchPeek();
   });
 
@@ -1402,6 +2609,14 @@ export function startApp() {
   els.peekRestoreButton.addEventListener('click', () => stopPeek(true));
 
   document.addEventListener('keydown', (e) => {
+    if (isDisconnectModalOpen()) {
+      if (e.key === 'Escape' || e.key === 'Enter') {
+        e.preventDefault();
+        closeDisconnectModal();
+        showModeSelection();
+      }
+      return;
+    }
     if (isConfirmModalOpen()) {
       if (e.key === 'Escape') {
         e.preventDefault();
