@@ -1,27 +1,27 @@
-# SPEC — Multi-Round Tie Continuation & New Game Confirmation Modal
+# SPEC — Multi-Round Tie Continuation, New Game Confirmation & Selectable Starting Player
 
 ## Root Cause / Objective
-Currently, `computeEndgame()` wipes `state.geishalove` on every round evaluation and `ui.js` treats a tied 8-turn round (`state.winner === 0`) as a terminal `"Game Over"` screen offering `"Play Again"`, while `#restart-button` immediately resets the match without confirmation. We must preserve Geisha favor states (`state.geishalove`) across tied rounds so subsequent rounds can be launched upon user approval (without offering a brand-new game on the tie result panel) until a round produces a winner, and guard `#restart-button` with an in-stage confirmation modal whenever a game is in progress.
+We must preserve Geisha favor states (`state.geishalove`) across tied 8-turn rounds (`state.winner === 0`) so subsequent rounds launch upon user approval with alternating starting players until a winner is decided, while guarding `#restart-button` with an in-stage confirmation modal during active matches. Additionally, before starting a new game on `#mode-selection-screen`, the user must be able to select the Round 1 starting player (`You`, `Computer`, or `Random`) alongside AI difficulty, with Round 1 kicking off AI opening turns cleanly when Player `2` starts and Round 2+ deterministically alternating from the prior round's concrete starter.
 
 ## File Map
 | Path | Operation | Purpose |
 |---|---|---|
-| `docs/src/game.js` | Modify | Track `round`, `roundStarter`, and `priorGeishaLove`; preserve `geishalove` on tie in `computeEndgame()`; add `startNextRound()`; expose `priorOwner` and `round`. |
+| `docs/src/game.js` | Modify | Track `round`, `roundStarter`, and `priorGeishaLove`; preserve `geishalove` on ties; add `resolveStarter()`, `resetGame(startingPlayer = 1)`, `startGame(startingPlayer = 1)`, and `startNextRound()`; expose `priorOwner`, `round`, and `roundStarter`. |
 | `docs/src/ai.js` | Modify | Make `evaluateCardUtility()` and `scoreBoardState()` account for preserved `state.geishalove` in Round 2+. |
-| `docs/index.html` | Modify | Add `#round-badge` in `.top-bar` and `#confirm-modal` dialog inside `#stage`. |
-| `docs/src/styles.css` | Modify | Layer `.top-bar` (`z-index: 110`), `.mode-selection-screen` (`z-index: 120`), and `.confirm-modal` (`z-index: 130`); style the confirmation dialog. |
-| `docs/src/ui.js` | Modify | Render preserved favor markers during play, show approval-only `"Start Round N"` panel on ties, manage `gameStarted` & `#confirm-modal`, and sequence `beginNextRound()`. |
-| `tests/game.test.js` | Modify | Add unit tests for multi-round ties, preserved `geishalove`, alternating round starter, and `startNextRound()` guards. |
+| `docs/index.html` | Modify | Add `#round-badge` in `.top-bar`, `#confirm-modal` inside `#stage`, and selectable difficulty + starting-player groups (`You`, `Computer`, `Random`) + `#start-game-button` inside `#mode-selection-screen`. |
+| `docs/src/styles.css` | Modify | Layer `.result-panel` (`100`), `.top-bar` (`110`), `.mode-selection-screen` (`120`), and `.confirm-modal` (`130`); style `.confirm-modal`, `.result-sub`, `.setup-buttons`, `.setup-button` (`.selected`), and `.start-game-btn`. |
+| `docs/src/ui.js` | Modify | Render preserved favor markers, manage `startingPlayerPref` & `updateSetupSelectionUI()`, unify Round 1 and Round 2+ AI opening-turn sequencing via `kickoffRound()`, show next-starter info on tie panels, and guard restarts with `#confirm-modal`. |
+| `tests/game.test.js` | Modify | Add unit tests for multi-round ties, preserved `geishalove`, `startGame(1 | 2 | 'random')`, full 8-turn round when Player 2 starts, and alternating starters across rounds. |
 | `tests/ai.test.js` | Modify | Add unit tests verifying AI decisions and responses respect preserved `geishalove` in Round 2+. |
-| `tests/simulation.test.js` | Modify | Add headless multi-round tie-continuation simulation test until a winner is decided. |
-| `AGENTS.md` | Modify | Document `startNextRound()`, multi-round tie continuation, and the New Game confirmation modal. |
-| `README.md` | Modify | Document multi-round tie rules (preserved character favors until a round has a winner). |
+| `tests/simulation.test.js` | Modify | Extend headless multi-game and multi-round tie simulations across `1`, `2`, and `'random'` initial starters until a decisive winner is reached. |
+| `AGENTS.md` | Modify | Document `startGame(startingPlayer)`, `startNextRound()`, pre-game starter selection, multi-round tie continuation, and the New Game confirmation modal. |
+| `README.md` | Modify | Document pre-game starting player selection, alternating round starters, multi-round tie rules, and New Game confirmation. |
 
 ---
 
 ## Technical Blueprint
 
-### 1. Rules & Multi-Round State (`docs/src/game.js`)
+### 1. Rules, Selectable Starter & Multi-Round State (`docs/src/game.js`)
 
 #### 1.1 State Additions
 Extend `state` with `round`, `roundStarter`, and `priorGeishaLove`:
@@ -45,8 +45,8 @@ export const state = {
 };
 ```
 
-#### 1.2 Shared Deal Helper, `resetGame()`, and `startNextRound()`
-Extract dealing/hand/action reset into an internal helper so `resetGame()` and `startNextRound()` stay DRY:
+#### 1.2 Starter Resolution, Shared Deal Helper, `resetGame`, `startGame`, and `startNextRound`
+Accept `startingPlayer` (`1 | 2 | 'random'`, defaulting to `1`) in `resetGame` and `startGame`. Resolve `'random'` once in `resetGame` into concrete `1` or `2` stored in `state.roundStarter` so `startNextRound()` always alternates via `other(state.roundStarter)`:
 ```js
 function recomputeScoresFromLove() {
   state.scores = [0, 0, 0];
@@ -60,6 +60,20 @@ function recomputeScoresFromLove() {
       state.geishaCount[2] += 1;
     }
   }
+}
+
+/**
+ * @param {1 | 2 | 'random'} [startingPlayer=1]
+ * @returns {1 | 2}
+ */
+function resolveStarter(startingPlayer = 1) {
+  if (startingPlayer === 1 || startingPlayer === 2) {
+    return startingPlayer;
+  }
+  if (startingPlayer === 'random') {
+    return Math.random() < 0.5 ? 1 : 2;
+  }
+  return 1;
 }
 
 function dealRound(starter) {
@@ -80,14 +94,15 @@ function dealRound(starter) {
   state.winner = 0;
 }
 
-export function resetGame() {
+export function resetGame(startingPlayer = 1) {
+  const starter = resolveStarter(startingPlayer);
   state.round = 1;
-  dealRound(1);
+  dealRound(starter);
   state.geishalove = Array(8).fill(0);
   state.priorGeishaLove = Array(8).fill(0);
   state.scores = [0, 0, 0];
   state.geishaCount = [0, 0, 0];
-  state.message = 'The game has started. Player 1 goes first.';
+  state.message = `The game has started. Player ${starter} goes first.`;
 }
 
 export function startNextRound() {
@@ -105,10 +120,15 @@ export function startNextRound() {
   drawCard(state.currentPlayer);
   return true;
 }
+
+export function startGame(startingPlayer = 1) {
+  resetGame(startingPlayer);
+  drawCard(state.currentPlayer);
+}
 ```
 
 #### 1.3 Preserving `geishalove` in `computeEndgame()` & Summary Exports
-Do **not** zero out `state.geishalove` in `computeEndgame()`. Snapshot `priorGeishaLove` first so the UI can hold pre-reveal favor markers while secret cards are in flight, then update `geishalove[i]` only where one player strictly leads in `geishagifts`:
+Snapshot `priorGeishaLove` before applying secret cards and update `geishalove[i]` only where one player strictly leads in `geishagifts` (leaving tied gifts unchanged so Round 2+ retains prior favors):
 ```js
 export function computeEndgame() {
   state.priorGeishaLove = [...state.geishalove];
@@ -161,8 +181,27 @@ function finishGame() {
 }
 ```
 Update `getGeishaRows()` and `getResultSummary()`:
-- In `getGeishaRows()`, add `priorOwner: state.priorGeishaLove[cardId]` to each returned row object.
-- In `getResultSummary()`, add `round: state.round` to the returned summary object.
+- In `getGeishaRows()`, include `priorOwner: state.priorGeishaLove[cardId]`.
+- In `getResultSummary()`, include `round: state.round` and `roundStarter: state.roundStarter`:
+```js
+export function getResultSummary() {
+  return {
+    player1: {
+      score: state.scores[1],
+      geishaCount: state.geishaCount[1],
+      secretCard: state.secretCard[1]
+    },
+    player2: {
+      score: state.scores[2],
+      geishaCount: state.geishaCount[2],
+      secretCard: state.secretCard[2]
+    },
+    winner: state.winner,
+    round: state.round,
+    roundStarter: state.roundStarter
+  };
+}
+```
 
 ---
 
@@ -205,49 +244,14 @@ function evaluateCardUtility(player, state) {
 ```
 
 #### 2.2 `scoreBoardState(player, giftsP1, giftsP2, secretP1, secretP2, geishaLove = null)`
-When `myCount === oppCount`, fall back to `geishaLove?.[g] ?? 0`:
-```js
-function scoreBoardState(player, giftsP1, giftsP2, secretP1, secretP2, geishaLove = null) {
-  const opp = other(player);
-  const myGifts = player === 1 ? giftsP1 : giftsP2;
-  const oppGifts = player === 1 ? giftsP2 : giftsP1;
-
-  let myScore = 0;
-  let oppScore = 0;
-  let myGeishas = 0;
-  let oppGeishas = 0;
-
-  for (let g = 1; g <= 7; g++) {
-    const val = cardValue(g);
-    const myCount = myGifts[g] + (player === 1 && secretP1 === g ? 1 : (player === 2 && secretP2 === g ? 1 : 0));
-    const oppCount = oppGifts[g] + (opp === 1 && secretP1 === g ? 1 : (opp === 2 && secretP2 === g ? 1 : 0));
-
-    let owner = 0;
-    if (myCount > oppCount) {
-      owner = player;
-    } else if (oppCount > myCount) {
-      owner = opp;
-    } else if (geishaLove) {
-      owner = geishaLove[g] || 0;
-    }
-
-    if (owner === player) {
-      myScore += val;
-      myGeishas += 1;
-    } else if (owner === opp) {
-      oppScore += val;
-      oppGeishas += 1;
-    }
-  }
-  // Win condition checks unchanged...
-```
-Pass `state.geishalove` as the 6th argument at all 6 call sites of `scoreBoardState` (`chooseAIAction` Gift loop, `chooseAIAction` Competition 2× branches, `chooseAIGiftResponse`, and `chooseAICompetitionResponse` 2× branches).
+When `myCount === oppCount`, fall back to `geishaLove?.[g] ?? 0` and pass `state.geishalove` at all 6 call sites in `docs/src/ai.js`.
 
 ---
 
 ### 3. HTML Markup (`docs/index.html`)
 
-1. Add `#round-badge` inside `<header class="top-bar">` right before `#turn-badge`:
+#### 3.1 Top Bar `#round-badge` & Stage `#confirm-modal`
+1. `#round-badge` inside `<header class="top-bar">` right before `#turn-badge`:
 ```html
         <header class="top-bar">
           <span id="round-badge" class="badge">Round 1</span>
@@ -259,7 +263,7 @@ Pass `state.geishalove` as the 6th argument at all 6 call sites of `scoreBoardSt
         </header>
 ```
 
-2. Add `#confirm-modal` inside `#stage` immediately after `#mode-selection-screen`:
+2. `#confirm-modal` inside `#stage` immediately after `#mode-selection-screen`:
 ```html
       <div id="confirm-modal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
         <div class="confirm-modal-card">
@@ -273,274 +277,245 @@ Pass `state.geishalove` as the 6th argument at all 6 call sites of `scoreBoardSt
       </div>
 ```
 
+#### 3.2 Pre-Game Setup Screen (`#mode-selection-screen`)
+Replace `#mode-selection-screen` (lines 72–93) with two symmetric 3-option toggle groups (`#difficulty-buttons` and `#starter-buttons`) plus `#start-game-button`:
+```html
+      <div id="mode-selection-screen" class="mode-selection-screen">
+        <div class="mode-selection-card">
+          <h1>Seven Favors</h1>
+          <p class="subtitle">A tactical duel of secret gifts, shrewd trades, and contested favor.</p>
+
+          <p class="mode-desc">Choose your opponent:</p>
+          <div id="difficulty-buttons" class="setup-buttons" role="group" aria-label="AI difficulty">
+            <button id="ai-casual-button" class="setup-button" type="button" data-diff="easy" aria-pressed="false">
+              <strong>Casual</strong>
+              <span>Easy / Relaxed</span>
+            </button>
+            <button id="ai-tactical-button" class="setup-button selected" type="button" data-diff="medium" aria-pressed="true">
+              <strong>Tactical</strong>
+              <span>Medium / Balanced</span>
+            </button>
+            <button id="ai-master-button" class="setup-button" type="button" data-diff="hard" aria-pressed="false">
+              <strong>Master</strong>
+              <span>Hard / Minimax</span>
+            </button>
+          </div>
+
+          <p class="mode-desc">Starting player:</p>
+          <div id="starter-buttons" class="setup-buttons" role="group" aria-label="Starting player">
+            <button id="starter-human-button" class="setup-button selected" type="button" data-starter="1" aria-pressed="true">
+              <strong>You</strong>
+              <span>You go first</span>
+            </button>
+            <button id="starter-ai-button" class="setup-button" type="button" data-starter="2" aria-pressed="false">
+              <strong>Computer</strong>
+              <span>AI goes first</span>
+            </button>
+            <button id="starter-random-button" class="setup-button" type="button" data-starter="random" aria-pressed="false">
+              <strong>Random</strong>
+              <span>Coin toss</span>
+            </button>
+          </div>
+
+          <button id="start-game-button" class="primary start-game-btn" type="button">Start Game</button>
+
+          <p class="disclaimer">Inspired by the core tabletop game mechanics designed by Kota Nakayama. <em>Hanamikoji</em> is a registered trademark of EmperorS4 and Taiwan Boardgame Design. All code and visual assets in this project are independent and created for non-commercial educational purposes.</p>
+        </div>
+      </div>
+```
+
 ---
 
-### 4. Stage Layering & Modal Styling (`docs/src/styles.css`)
+### 4. Stage Layering, Modal & Pre-Game Setup Styling (`docs/src/styles.css`)
 
-1. Update `.top-bar` so `#restart-button` stays clickable even when `#result-panel` (`z-index: 100`) is displayed on a tie round, while remaining beneath `.mode-selection-screen` (`z-index: 120`) and `.confirm-modal` (`z-index: 130`):
+#### 4.1 Top Bar & Overlay Stacking + `.confirm-modal`
+Maintain overlay stacking order: `.result-panel` (`z-index: 100`), `.top-bar` (`z-index: 110`), `.mode-selection-screen` (`z-index: 120`), and `.confirm-modal` (`z-index: 130`).
+
+#### 4.2 Tie Subtitle (`.result-sub`) & Pre-Game Setup Controls
+1. Add `.result-sub` right after `.result-winner` (around line 866):
 ```css
-.top-bar {
-  position: relative;
-  z-index: 110;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 4px;
+.result-sub {
+  margin: -12px 0 20px 0;
+  font-size: 0.95rem;
+  color: var(--text-muted);
 }
 ```
-*(Note: `.table` has `position: relative` without `z-index`, so `.top-bar` participates directly in `.stage`'s stacking context.)*
 
-2. Separate overlay z-indexes and add `.confirm-modal` styles:
+2. Update `.mode-selection-card` and replace `.difficulty-buttons` / `.diff-button` rules (lines 920–982) with unified setup option rules fitting cleanly inside the `900px` stage height:
 ```css
-.result-panel,
-.mode-selection-screen,
-.confirm-modal {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  border-radius: 20px;
-}
-
-.result-panel {
-  z-index: 100;
-  background: rgba(6, 12, 22, 0.55);
-  backdrop-filter: blur(4px);
-}
-
-.mode-selection-screen {
-  z-index: 120;
-  background: rgba(6, 12, 22, 0.96);
-  backdrop-filter: blur(8px);
-  padding: 24px;
-}
-
-.confirm-modal {
-  z-index: 130;
-  background: rgba(6, 12, 22, 0.72);
-  backdrop-filter: blur(4px);
-}
-
-.confirm-modal-card {
-  max-width: 460px;
+.mode-selection-card {
+  max-width: 580px;
   width: 100%;
-  padding: 28px 32px;
-  border-radius: 20px;
-  background: rgba(15, 23, 42, 0.98);
-  border: 2px solid rgba(217, 108, 111, 0.5);
+  padding: 32px 36px;
+  background: rgba(24, 40, 66, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 24px;
   text-align: center;
-  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.65);
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
 }
 
-.confirm-modal-card h2 {
-  margin: 0 0 12px 0;
-  font-size: 1.6rem;
+.mode-selection-card h1 {
+  margin: 0 0 6px 0;
+  font-size: 2.2rem;
   color: var(--accent);
 }
 
-.confirm-modal-desc {
-  margin: 0 0 24px 0;
-  font-size: 1rem;
-  line-height: 1.45;
+.subtitle {
+  color: var(--text-muted);
+  margin-top: 0;
+  margin-bottom: 20px;
+  font-size: 0.95rem;
+}
+
+.mode-desc {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 0 0 10px 0;
+}
+
+.setup-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.setup-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  border: 1.5px solid rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+  transform: translateY(0);
+  transition: transform 0.15s, background 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.setup-button:hover {
+  transform: translateY(-2px);
+  background: rgba(255, 255, 255, 0.11);
+}
+
+.setup-button.selected {
+  background: rgba(244, 211, 94, 0.16);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(244, 211, 94, 0.35), 0 8px 20px rgba(0, 0, 0, 0.28);
+}
+
+.setup-button strong {
+  font-size: 0.95rem;
   color: var(--text);
 }
 
-.confirm-modal-actions {
-  display: flex;
-  justify-content: center;
-  gap: 14px;
+.setup-button.selected strong {
+  color: var(--accent);
 }
 
-.modal-btn {
-  padding: 12px 24px;
-  font-size: 1rem;
-  font-weight: 700;
+.setup-button span {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.setup-button.selected span {
+  color: var(--text);
+}
+
+.start-game-btn {
+  width: 100%;
+  margin-top: 4px;
+  padding: 14px 28px;
+  font-size: 1.05rem;
+  font-weight: 800;
   border-radius: 12px;
+  border: none;
   cursor: pointer;
   transform: translateY(0);
   transition: transform 0.15s, filter 0.15s;
 }
 
-.modal-btn:hover {
+.start-game-btn:hover {
   transform: translateY(-2px);
   filter: brightness(1.08);
 }
-
-.modal-btn.danger {
-  background: linear-gradient(135deg, #ef4444, #b91c1c);
-  color: #fff;
-  border: none;
-}
 ```
-Remove the duplicate `.mode-selection-screen` background block or merge cleanly so `z-index: 120` is not overridden later in `styles.css`.
+*(Keep `.primary` and `.secondary` intact as they style `.start-game-btn`, `.restart-result-btn`, and `.modal-btn.secondary`.)*
 
 ---
 
-### 5. UI Presentation, Confirmation Flow & Next-Round Sequencing (`docs/src/ui.js`)
+### 5. UI Presentation, Pre-Game Setup, Confirmation Flow & Turn Sequencing (`docs/src/ui.js`)
 
-#### 5.1 DOM Refs & State
-Add to `els`:
+#### 5.1 DOM Refs, Module State & Setup Helpers
+Extend `els` with setup controls:
 ```js
+  modeSelectionScreen: document.getElementById('mode-selection-screen'),
+  difficultyButtons: document.getElementById('difficulty-buttons'),
+  aiCasualButton: document.getElementById('ai-casual-button'),
+  aiTacticalButton: document.getElementById('ai-tactical-button'),
+  aiMasterButton: document.getElementById('ai-master-button'),
+  starterButtons: document.getElementById('starter-buttons'),
+  starterHumanButton: document.getElementById('starter-human-button'),
+  starterAiButton: document.getElementById('starter-ai-button'),
+  starterRandomButton: document.getElementById('starter-random-button'),
+  startGameButton: document.getElementById('start-game-button'),
   roundBadge: document.getElementById('round-badge'),
   confirmModal: document.getElementById('confirm-modal'),
   confirmCancelButton: document.getElementById('confirm-cancel-button'),
   confirmAcceptButton: document.getElementById('confirm-accept-button')
 ```
-Add module state variable:
+
+Add `startingPlayerPref` alongside `aiDifficulty` and `gameStarted`:
 ```js
-let gameStarted = false;    // true from startNewGame() until a winner's result panel is shown or game is ended
+let aiDifficulty = 'medium';
+let startingPlayerPref = HUMAN; // 1 (HUMAN) | 2 (AI_PLAYER) | 'random'
 ```
 
-Add modal helpers:
+Add `updateSetupSelectionUI()` alongside the confirmation modal helpers:
 ```js
-function isConfirmModalOpen() {
-  return !els.confirmModal.classList.contains('hidden');
-}
-
-function openConfirmModal() {
-  els.confirmModal.classList.remove('hidden');
-  els.confirmCancelButton.focus();
-}
-
-function closeConfirmModal() {
-  els.confirmModal.classList.add('hidden');
+function updateSetupSelectionUI() {
+  els.difficultyButtons.querySelectorAll('[data-diff]').forEach((btn) => {
+    const active = btn.dataset.diff === aiDifficulty;
+    btn.classList.toggle('selected', active);
+    btn.setAttribute('aria-pressed', String(active));
+  });
+  els.starterButtons.querySelectorAll('[data-starter]').forEach((btn) => {
+    const val = btn.dataset.starter === 'random' ? 'random' : Number(btn.dataset.starter);
+    const active = val === startingPlayerPref;
+    btn.classList.toggle('selected', active);
+    btn.setAttribute('aria-pressed', String(active));
+  });
 }
 ```
 
 #### 5.2 Top Bar & Board Favor Markers
-In `updateTopBar()`:
+Keep `els.roundBadge.textContent = \`Round ${Game.state.round}\`` in `updateTopBar()` and `const displayedOwner = Game.state.gameOver && !revealDone ? row.priorOwner : row.owner;` in `buildBoard()`.
+
+#### 5.3 Tie Round Approval & Next-Starter Subtitle (`buildResultPanel()`)
+In `buildResultPanel()`, display who goes first in the upcoming round when `isTie` is `true` (while still offering only `Start Round ${result.round + 1}` on tie rounds):
 ```js
-function updateTopBar() {
-  els.roundBadge.textContent = `Round ${Game.state.round}`;
-  els.turnBadge.textContent = `Turn ${Math.min(Game.state.turnsTaken + 1, 8)} / 8`;
-  els.difficultyBadge.textContent = `${DIFF_LABELS[aiDifficulty]} AI`;
-  els.playerZone.classList.toggle('active', !Game.state.gameOver && Game.state.currentPlayer === HUMAN);
-  els.opponentZone.classList.toggle('active', !Game.state.gameOver && Game.state.currentPlayer === AI_PLAYER);
-}
-```
-
-In `buildBoard()`, render preserved favor markers throughout Round 2+, and hold `row.priorOwner` while secret reveal flights are in mid-air (`Game.state.gameOver && !revealDone`):
-```js
-    const displayedOwner = Game.state.gameOver && !revealDone ? row.priorOwner : row.owner;
-    if (displayedOwner !== 0) {
-      const marker = document.createElement('div');
-      marker.className = `favor-marker ${displayedOwner === HUMAN ? 'favor-p1' : 'favor-p2'}`;
-      marker.textContent = displayedOwner === HUMAN ? '▼ You' : '▲ AI';
-      geisha.appendChild(marker);
-    }
-```
-
-#### 5.3 Tie Round Approval vs Final Game Over (`buildResultPanel()`)
-Update `buildResultPanel()` so a tie round **never** offers to start a completely new game and **only** offers an approval button to launch the next round in the same game:
-```js
-function buildResultPanel() {
-  if (!Game.state.gameOver || !resultReady) {
-    els.resultPanel.classList.add('hidden');
-    els.resultPanel.replaceChildren();
-    return;
-  }
-
-  els.resultPanel.classList.remove('hidden');
-  const result = Game.getResultSummary();
-  const isTie = result.winner === 0;
-
-  const p1SecretName = result.player1.secretCard
-    ? `${CARD_ICONS[result.player1.secretCard]} ${Game.cardName(result.player1.secretCard)} (${Game.cardValue(result.player1.secretCard)} pts)`
-    : 'None';
-  const p2SecretName = result.player2.secretCard
-    ? `${CARD_ICONS[result.player2.secretCard]} ${Game.cardName(result.player2.secretCard)} (${Game.cardValue(result.player2.secretCard)} pts)`
-    : 'None';
-
-  const headingText = isTie
-    ? `Round ${result.round} Tied`
-    : (result.round > 1 ? `Game Over · Round ${result.round}` : 'Game Over');
-
-  let winnerText = '🤝 Tie round! Geisha favors carry over.';
-  if (result.winner === HUMAN) {
-    winnerText = '🏆 You won!';
-  } else if (result.winner === AI_PLAYER) {
-    winnerText = '🤖 Computer won!';
-  }
+  const nextStarter = Game.other(result.roundStarter);
+  const nextStarterNote = isTie
+    ? `<p class="result-sub">${nextStarter === HUMAN ? 'You go' : 'Computer goes'} first in Round ${result.round + 1}.</p>`
+    : '';
 
   const card = document.createElement('div');
   card.className = 'result-card';
   card.innerHTML = `
     <h2>${headingText}</h2>
     <div class="result-winner">${winnerText}</div>
+    ${nextStarterNote}
     <div class="result-stats">
-      <div class="result-col">
-        <h3>You</h3>
-        <p><strong>Charm Points:</strong> ${result.player1.score}</p>
-        <p><strong>Geishas Held:</strong> ${result.player1.geishaCount} / 7</p>
-        <p><strong>Revealed Secret:</strong> ${p1SecretName}</p>
-      </div>
-      <div class="result-col">
-        <h3>Computer</h3>
-        <p><strong>Charm Points:</strong> ${result.player2.score}</p>
-        <p><strong>Geishas Held:</strong> ${result.player2.geishaCount} / 7</p>
-        <p><strong>Revealed Secret:</strong> ${p2SecretName}</p>
-      </div>
-    </div>
-  `;
-
-  const actionBtn = document.createElement('button');
-  actionBtn.className = 'primary restart-result-btn';
-  actionBtn.type = 'button';
-  if (isTie) {
-    actionBtn.textContent = `Start Round ${result.round + 1}`;
-    actionBtn.addEventListener('click', () => beginNextRound());
-  } else {
-    actionBtn.textContent = 'Play Again';
-    actionBtn.addEventListener('click', () => showModeSelection());
-  }
-
-  card.appendChild(actionBtn);
-  els.resultPanel.replaceChildren(card);
-}
+      ...
 ```
 
-#### 5.4 Lifecycle, `afterCommit()`, `beginNextRound()`, and Listeners
-1. In `afterCommit(prevNext, token)`, inside the `if (Game.state.gameOver)` block when `resultReady = true` is set:
+#### 5.4 Lifecycle, `kickoffRound()`, `showModeSelection()`, `startNewGame()`, `beginNextRound()`, and Listeners
+1. Extract `kickoffRound()` so both Round 1 (`startNewGame()`) and Round 2+ (`beginNextRound()`) lock input (`animating = true`) and sequence `playAITurn(token)` whenever `Game.state.currentPlayer === AI_PLAYER`:
 ```js
-    resultReady = true;
-    animating = false;
-    if (Game.state.winner !== 0) {
-      gameStarted = false;
-    }
-    render();
-    return;
-```
-*(Note: When `Game.state.winner === 0`, `gameStarted` remains `true` because the multi-round game has not ended.)*
-
-2. Update `showModeSelection()`, `startNewGame(difficulty)`, and add `beginNextRound()` + `handleRestartClick()`:
-```js
-function showModeSelection() {
-  gameStarted = false;
-  closeConfirmModal();
-  resetUIState();
-  Game.resetGame();
-  els.modeSelectionScreen.classList.remove('hidden');
-  renderHistory(false);
-  render();
-}
-
-function startNewGame(difficulty) {
-  closeConfirmModal();
-  resetUIState();
-  gameStarted = true;
-  aiDifficulty = difficulty;
-  els.modeSelectionScreen.classList.add('hidden');
-  Game.startGame();
-  renderHistory(false);
-  render();
-}
-
-async function beginNextRound() {
-  if (!Game.state.gameOver || Game.state.winner !== 0) return;
-  closeConfirmModal();
-  resetUIState();
-  gameStarted = true;
-  Game.startNextRound();
+async function kickoffRound() {
   renderHistory(false);
 
   if (Game.state.currentPlayer === AI_PLAYER) {
@@ -563,56 +538,82 @@ async function beginNextRound() {
   }
 }
 
-function handleRestartClick() {
-  if (gameStarted) {
-    openConfirmModal();
-  } else {
-    showModeSelection();
-  }
+function showModeSelection() {
+  gameStarted = false;
+  closeConfirmModal();
+  resetUIState();
+  Game.resetGame();
+  updateSetupSelectionUI();
+  els.modeSelectionScreen.classList.remove('hidden');
+  renderHistory(false);
+  render();
+}
+
+async function startNewGame() {
+  closeConfirmModal();
+  resetUIState();
+  gameStarted = true;
+  els.modeSelectionScreen.classList.add('hidden');
+  Game.startGame(startingPlayerPref);
+  await kickoffRound();
+}
+
+async function beginNextRound() {
+  if (!Game.state.gameOver || Game.state.winner !== 0) return;
+  closeConfirmModal();
+  resetUIState();
+  gameStarted = true;
+  Game.startNextRound();
+  await kickoffRound();
 }
 ```
 
-3. Update `startApp()` event bindings:
-- Replace `els.restartButton.addEventListener('click', ...)` with `els.restartButton.addEventListener('click', handleRestartClick);`.
-- Wire confirmation modal listeners:
+2. In `startApp()`, replace the three direct `ai*Button` `startNewGame(...)` listeners with group selection listeners + `#start-game-button`:
 ```js
-  els.confirmCancelButton.addEventListener('click', closeConfirmModal);
-  els.confirmAcceptButton.addEventListener('click', () => showModeSelection());
-  els.confirmModal.addEventListener('click', (e) => {
-    if (e.target === els.confirmModal) closeConfirmModal();
+  els.difficultyButtons.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-diff]');
+    if (!btn) return;
+    aiDifficulty = btn.dataset.diff;
+    updateSetupSelectionUI();
   });
-```
-- At the very top of `document.addEventListener('keydown', (e) => { ... })`:
-```js
-    if (isConfirmModalOpen()) {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        closeConfirmModal();
-      }
-      return;
-    }
+
+  els.starterButtons.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-starter]');
+    if (!btn) return;
+    const raw = btn.dataset.starter;
+    startingPlayerPref = raw === 'random' ? 'random' : Number(raw);
+    updateSetupSelectionUI();
+  });
+
+  els.startGameButton.addEventListener('click', () => startNewGame());
 ```
 
 ---
 
 ## Edge Cases
-1. **Premature Favor Marker Flip During Secret Reveal**: `computeEndgame()` runs synchronously on Turn 8 before `animateReveal()`. In Round 2+, rendering `row.priorOwner` while `Game.state.gameOver && !revealDone` keeps Round 1's preserved markers on screen until the secret cards finish flying onto the gift stacks, then switches to `row.owner` once `revealDone = true`.
-2. **Equal Gifts in Round 2+ Must Not Clear Prior Favor**: When `geishagifts[1][i] === geishagifts[2][i]` (including `0 === 0` if all copies of a card were discarded/unplayed), `state.geishalove[i]` must retain its prior round's owner (`1`, `2`, or `0`), never reset to `0`.
-3. **Consecutive Ties (Round 2 → Round 3 → …)**: `startNextRound()` increments `state.round` without upper bound and preserves the latest `state.geishalove` each time until `state.winner` is `1` or `2`.
-4. **Alternating Round Starter & AI Turn 1**: Even rounds start with `AI_PLAYER` (`state.currentPlayer === 2`), who already drew their 7th card inside `Game.startNextRound()`. `beginNextRound()` must set `animating = true` before `render()` and invoke `playAITurn(token)` with `gameToken` cancellation checks so human input is locked while AI opens the round.
-5. **New Game Clicked Mid-Animation / Mid-Offer / On Tie Screen**: Because `gameStarted` stays `true` from `startNewGame()` across turns, animations, secret reveals, and tie-round overlays (only turning `false` once a decisive winner's result panel is shown or the user confirms ending the game), clicking `#restart-button` always opens `#confirm-modal`. Confirming calls `showModeSelection()`, which increments `gameToken` and calls `Fx.clearFx()` to cleanly abort any in-flight async sequence or pending `awaitHumanChoice()` promise.
-6. **Keyboard Bleed-Through Under Modal**: Pressing `Escape` or `Enter` while `#confirm-modal` is open must not deselect `pendingAction` or trigger `confirmSelection()` on cards behind the dialog.
-7. **History Rail & Discard Pile Reset Each Round**: `resetUIState()` clears `history = []` on `beginNextRound()`, keeping the left rail within the 8-item vertical stage budget and resetting `discardPile` to empty since all 21 item cards are reshuffled back into the deck.
-8. **Backwards Compatibility with Existing Tests**: `state.gameOver` remains `true` after 8 turns even when `state.winner === 0`, preserving all assertions in `tests/game.test.js` and `tests/simulation.test.js`.
+1. **Order-Independent Pre-Game Configuration**: Separating difficulty and starting-player toggles from `#start-game-button` prevents accidentally launching the match before selecting the starting player regardless of click order, and preserves the user's preferred difficulty and starter when returning via `"Play Again"` or `"Yes, New Game"`.
+2. **`Random` Starter Must Alternate Deterministically in Round 2+**: `resolveStarter('random')` resolves to concrete `1` or `2` once in `resetGame()` and stores it in `state.roundStarter`. Subsequent calls to `startNextRound()` compute `other(state.roundStarter)` rather than re-rolling randomness, guaranteeing strict alternation (`1 -> 2 -> 1` or `2 -> 1 -> 2`) across tied rounds while keeping `startingPlayerPref === 'random'` in `ui.js` for the next new game.
+3. **AI Opening Turn on Round 1 (`startingPlayer === 2` or `'random' -> 2`)**: `els.modeSelectionScreen.classList.add('hidden')` runs *before* `kickoffRound()` calls `render()` and `playAITurn(token)`, ensuring the stage is visible, `animating = true` locks human hand/action controls during the `500ms` lead-in, and card flights measure accurate viewport rects.
+4. **Human Responding to AI Turn 1 Gift/Competition Offer**: When AI opens Round 1 with `gift` or `competition`, `awaitHumanChoice()` sets `pendingOffer.interactive = true`; `els.offerTray`'s click listener checks `pendingOffer?.interactive` (not `animating`), so the human can choose their card/pair normally before drawing their 7th card via `afterCommit` -> `animateDraw(HUMAN, prevNext, token)`.
+5. **Premature Favor Marker Flip & Equal Gifts in Round 2+**: `row.priorOwner` holds Round 1's markers during `animateReveal()` (`Game.state.gameOver && !revealDone`), and equal `geishagifts` in `computeEndgame()` preserve prior `state.geishalove[i]` ownership.
+6. **New Game Clicked During AI's Opening Turn, Mid-Offer, or Tie Screen**: `gameStarted = true` is set before `await kickoffRound()` and stays `true` across tied rounds; clicking `#restart-button` opens `#confirm-modal`, and confirming increments `gameToken` + calls `Fx.clearFx()` to abort any in-flight async turn cleanly while `keydown` traps `Escape` when the modal is open.
+7. **Backwards Compatibility with Existing Tests**: Defaulting `startingPlayer = 1` in `resetGame()` and `startGame()` keeps all existing parameterless calls in `tests/` passing unchanged.
 
 ---
 
 ## Execution Checklist
-- [x] Step 1: Update `docs/src/game.js` per §1 (`round`, `roundStarter`, `priorGeishaLove`, `recomputeScoresFromLove`, `dealRound`, `resetGame`, `startNextRound`, `computeEndgame` preserving `geishalove` on gift ties, `getGeishaRows`, and `getResultSummary`).
-- [x] Step 2: Update `docs/src/ai.js` per §2 so `evaluateCardUtility` and `scoreBoardState` incorporate `state.geishalove` carryover ownership across all 6 call sites.
-- [x] Step 3: Update `docs/index.html` per §3 to add `#round-badge` in `.top-bar` and `#confirm-modal` inside `#stage`.
-- [x] Step 4: Update `docs/src/styles.css` per §4 to set overlay stacking order (`.result-panel` 100, `.top-bar` 110, `.mode-selection-screen` 120, `.confirm-modal` 130) and style `.confirm-modal`.
-- [x] Step 5: Update `docs/src/ui.js` per §5 (`els`, `gameStarted`, modal helpers, `updateTopBar`, `buildBoard` using `priorOwner` before `revealDone`, `buildResultPanel` tie-approval vs game-over branching, `afterCommit`, `showModeSelection`, `startNewGame`, `beginNextRound`, `handleRestartClick`, and modal/keyboard listeners).
-- [x] Step 6: Expand `tests/game.test.js`, `tests/ai.test.js`, and `tests/simulation.test.js` to cover multi-round ties (including 3+ rounds until someone wins), preserved `geishalove` on tied gifts, alternating round starters, `startNextRound()` guards, and AI carryover evaluation.
-- [x] Step 7: Update `AGENTS.md` and `README.md` to document multi-round tie continuation with preserved character favors and the New Game confirmation modal.
-- [x] Step 8: Run `npm test` and `node --check docs/src/game.js docs/src/ai.js docs/src/ui.js docs/src/fx.js` to verify zero syntax errors and 100% passing unit and simulation tests.
+- [x] Step 1: Update `docs/src/game.js` with `round`, `roundStarter`, `priorGeishaLove`, `recomputeScoresFromLove`, `dealRound`, `startNextRound`, `computeEndgame` preserving `geishalove` on gift ties, `getGeishaRows`, and `getResultSummary`.
+- [x] Step 2: Update `docs/src/ai.js` so `evaluateCardUtility` and `scoreBoardState` incorporate `state.geishalove` carryover ownership across all 6 call sites.
+- [x] Step 3: Update `docs/index.html` to add `#round-badge` in `.top-bar` and `#confirm-modal` inside `#stage`.
+- [x] Step 4: Update `docs/src/styles.css` to set overlay stacking order (`.result-panel` 100, `.top-bar` 110, `.mode-selection-screen` 120, `.confirm-modal` 130) and style `.confirm-modal`.
+- [x] Step 5: Update `docs/src/ui.js` with `gameStarted`, modal helpers, `updateTopBar`, `buildBoard` using `priorOwner` before `revealDone`, `buildResultPanel` tie-approval vs game-over branching, `afterCommit`, `beginNextRound`, `handleRestartClick`, and modal/keyboard listeners.
+- [x] Step 6: Expand `tests/game.test.js`, `tests/ai.test.js`, and `tests/simulation.test.js` for multi-round ties, preserved `geishalove`, `startNextRound()` guards, and AI carryover evaluation.
+- [x] Step 7: Update `AGENTS.md` and `README.md` to document multi-round tie continuation and the New Game confirmation modal.
+- [x] Step 8: Verify baseline tests and syntax checks pass.
+- [x] Step 9: Update `docs/src/game.js` per §1.2 and §1.3 to add `resolveStarter()`, parameterize `resetGame(startingPlayer = 1)` and `startGame(startingPlayer = 1)`, and include `roundStarter` in `getResultSummary()`.
+- [x] Step 10: Update `docs/index.html` per §3.2 to replace `#mode-selection-screen` inner controls with `#difficulty-buttons`, `#starter-buttons` (`You`, `Computer`, `Random`), and `#start-game-button`.
+- [x] Step 11: Update `docs/src/styles.css` per §4.2 to add `.result-sub` and replace `.difficulty-buttons` / `.diff-button` with `.setup-buttons`, `.setup-button` (`.selected`), and `.start-game-btn`.
+- [x] Step 12: Update `docs/src/ui.js` per §5.1, §5.3, and §5.4 to add setup DOM refs (`difficultyButtons`, `starterButtons`, `starter*Button`, `startGameButton`), `startingPlayerPref`, `updateSetupSelectionUI()`, next-starter tie subtitle in `buildResultPanel()`, shared `kickoffRound()` for `startNewGame()` and `beginNextRound()`, and setup click listeners in `startApp()`.
+- [x] Step 13: Expand `tests/game.test.js` and `tests/simulation.test.js` to test `startGame(1)`, `startGame(2)`, `startGame('random')`, full 8-turn completion when Player 2 starts Round 1, and deterministic multi-round starter alternation (`2 -> 1 -> 2` and `'random'` carryover).
+- [x] Step 14: Update `AGENTS.md` and `README.md` to document selectable starting players before starting a new game and alternating starters across subsequent rounds.
+- [x] Step 15: Run `node --check docs/src/game.js docs/src/ai.js docs/src/ui.js docs/src/fx.js` and `npm test` to verify zero syntax errors and 100% passing unit and simulation tests.

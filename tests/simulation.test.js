@@ -5,12 +5,21 @@ import * as AI from '../docs/src/ai.js';
 
 test('Simulate 50 AI vs AI games across all difficulty combinations', () => {
   const difficulties = ['easy', 'medium', 'hard'];
+  const starters = [1, 2, 'random'];
 
   for (let i = 0; i < 50; i++) {
     const p1Diff = difficulties[i % 3];
     const p2Diff = difficulties[(i + 1) % 3];
+    const starterPref = starters[i % 3];
 
-    Game.startGame();
+    Game.startGame(starterPref);
+    if (starterPref !== 'random') {
+      assert.equal(Game.state.roundStarter, starterPref);
+      assert.equal(Game.state.currentPlayer, starterPref);
+    } else {
+      assert.ok([1, 2].includes(Game.state.roundStarter));
+      assert.equal(Game.state.currentPlayer, Game.state.roundStarter);
+    }
 
     while (!Game.state.gameOver && Game.state.turnsTaken < 8) {
       const activePlayer = Game.state.currentPlayer;
@@ -59,11 +68,13 @@ test('Simulate 50 AI vs AI games across all difficulty combinations', () => {
     assert.ok(summary.player1.geishaCount >= 0);
     assert.ok(summary.player2.geishaCount >= 0);
     assert.ok(summary.player1.geishaCount + summary.player2.geishaCount <= 7);
+    assert.ok([1, 2].includes(summary.roundStarter));
   }
 });
 
 test('Multi-round tie simulation continues rounds until a decisive winner is reached', () => {
   const difficulties = ['easy', 'medium', 'hard'];
+  const starters = [1, 2, 'random'];
 
   function playOneRound(p1Diff, p2Diff) {
     while (!Game.state.gameOver && Game.state.turnsTaken < 8) {
@@ -97,11 +108,18 @@ test('Multi-round tie simulation continues rounds until a decisive winner is rea
     }
   }
 
-  for (let match = 0; match < 25; match++) {
+  for (let match = 0; match < 30; match++) {
     const p1Diff = difficulties[match % 3];
     const p2Diff = difficulties[(match + 1) % 3];
+    const starterPref = starters[match % 3];
 
-    Game.startGame();
+    Game.startGame(starterPref);
+    const r1Starter = Game.state.roundStarter;
+    if (starterPref !== 'random') {
+      assert.equal(r1Starter, starterPref);
+    } else {
+      assert.ok([1, 2].includes(r1Starter));
+    }
     playOneRound(p1Diff, p2Diff);
 
     let roundsPlayed = 1;
@@ -123,5 +141,7 @@ test('Multi-round tie simulation continues rounds until a decisive winner is rea
     const summary = Game.getResultSummary();
     assert.ok(summary.winner === 1 || summary.winner === 2);
     assert.equal(summary.round, roundsPlayed);
+    const expectedFinalStarter = roundsPlayed % 2 === 1 ? r1Starter : Game.other(r1Starter);
+    assert.equal(summary.roundStarter, expectedFinalStarter);
   }
 });

@@ -75,8 +75,9 @@ npm test
 ## Architecture & Module Responsibilities
 
 1. **`docs/src/game.js` (State & Rules Engine)**
-   - Exports `state`, `resetGame`, `startGame`, `startNextRound`, `drawCard`, `performSecret`, `performTradeoff`, `performGift`, `performCompetition`, `getGeishaRows`, and `getResultSummary`.
+   - Exports `state`, `resetGame(startingPlayer = 1)`, `startGame(startingPlayer = 1)`, `startNextRound`, `drawCard`, `performSecret`, `performTradeoff`, `performGift`, `performCompetition`, `getGeishaRows`, and `getResultSummary`.
    - **1-Based Indexing Convention:** Players are indexed `1` (Human) and `2` (AI), and Character/Card types are indexed `1` through `7`. Index `0` in arrays is unused padding.
+   - **Selectable Starting Player:** `resetGame` and `startGame` accept `1`, `2`, or `'random'` (resolving `'random'` once into concrete `1` or `2` stored in `state.roundStarter`). `getResultSummary()` exposes `round` and `roundStarter`.
    - **Card & Deck Definitions:**
      - ID 1: Burger (Value: 2, 2 cards in deck)
      - ID 2: Chips (Value: 2, 2 cards in deck)
@@ -110,11 +111,12 @@ npm test
    - Animates 3D card flights and flips in `#fx-layer` (outside `#stage` so `position: fixed` viewport coordinates are unaffected by stage transforms) while respecting `prefers-reduced-motion`.
 
 4. **`docs/src/ui.js` (Presentation, Interaction & Turn Sequencing)**
-   - Single-player presentation layer managing UI state (`aiDifficulty`, `pendingAction`, `pendingOffer`, `history`, `animating`, `hiddenDraw`, `revealDone`, `resultReady`, `gameToken`, `currentScale`, `gameStarted`) and re-rendering via `render()`.
+   - Single-player presentation layer managing UI state (`aiDifficulty`, `startingPlayerPref`, `pendingAction`, `pendingOffer`, `history`, `animating`, `hiddenDraw`, `revealDone`, `resultReady`, `gameToken`, `currentScale`, `gameStarted`) and re-rendering via `render()`.
+   - Pre-game setup screen lets the player choose AI difficulty (`Casual`, `Tactical`, `Master`) and Round 1 starting player (`You`, `Computer`, `Random`) before clicking `Start Game`; `kickoffRound()` sequences AI opening turns cleanly in both Round 1 and Round 2+.
    - Scales the fixed `1760×900` `#stage` via `--stage-scale` (`fitStage()`) so the interface fills the viewport without scrolling.
    - Renders a left-hand move history rail colour-coded by actor (**blue** = player, **red** = computer), newest move on top, with hover popouts showing card destinations.
    - Competition selection displays `1` and `2` pair badges on selected cards; endgame reveal animates secret cards onto stacks and shows `▼ You` / `▲ AI` favor markers and the result summary.
-   - **Round Continuation & Confirmation:** Tie rounds display a "Start Round N" approval button on the result panel (does not offer a fresh restart). Clicking the New Game button at any point during an ongoing match displays an in-stage confirmation modal asking if the user is sure.
+   - **Round Continuation & Confirmation:** Tie rounds display who goes first next and a `"Start Round N"` approval button on the result panel (does not offer a fresh restart). Clicking the New Game button at any point during an ongoing match displays an in-stage confirmation modal asking if the user is sure.
 
 5. **`docs/src/styles.css` (Styling & Layout)**
    - Fixed-stage `1760×900` grid layout scaled by `--stage-scale`, zero page scrolling (`overflow: hidden`).

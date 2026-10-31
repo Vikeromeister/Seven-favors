@@ -73,21 +73,41 @@
         <div class="mode-selection-card">
           <h1>Seven Favors</h1>
           <p class="subtitle">A tactical duel of secret gifts, shrewd trades, and contested favor.</p>
+
           <p class="mode-desc">Choose your opponent:</p>
-          <div class="difficulty-buttons">
-            <button id="ai-casual-button" class="diff-button secondary" type="button" data-diff="easy">
+          <div id="difficulty-buttons" class="setup-buttons" role="group" aria-label="AI difficulty">
+            <button id="ai-casual-button" class="setup-button" type="button" data-diff="easy" aria-pressed="false">
               <strong>Casual</strong>
               <span>Easy / Relaxed</span>
             </button>
-            <button id="ai-tactical-button" class="diff-button primary" type="button" data-diff="medium">
+            <button id="ai-tactical-button" class="setup-button selected" type="button" data-diff="medium" aria-pressed="true">
               <strong>Tactical</strong>
               <span>Medium / Balanced</span>
             </button>
-            <button id="ai-master-button" class="diff-button secondary" type="button" data-diff="hard">
+            <button id="ai-master-button" class="setup-button" type="button" data-diff="hard" aria-pressed="false">
               <strong>Master</strong>
               <span>Hard / Minimax</span>
             </button>
           </div>
+
+          <p class="mode-desc">Starting player:</p>
+          <div id="starter-buttons" class="setup-buttons" role="group" aria-label="Starting player">
+            <button id="starter-human-button" class="setup-button selected" type="button" data-starter="1" aria-pressed="true">
+              <strong>You</strong>
+              <span>You go first</span>
+            </button>
+            <button id="starter-ai-button" class="setup-button" type="button" data-starter="2" aria-pressed="false">
+              <strong>Computer</strong>
+              <span>AI goes first</span>
+            </button>
+            <button id="starter-random-button" class="setup-button" type="button" data-starter="random" aria-pressed="false">
+              <strong>Random</strong>
+              <span>Coin toss</span>
+            </button>
+          </div>
+
+          <button id="start-game-button" class="primary start-game-btn" type="button">Start Game</button>
+
           <p class="disclaimer">Inspired by the core tabletop game mechanics designed by Kota Nakayama. <em>Hanamikoji</em> is a registered trademark of EmperorS4 and Taiwan Boardgame Design. All code and visual assets in this project are independent and created for non-commercial educational purposes.</p>
         </div>
       </div>

@@ -864,6 +864,12 @@ body {
   color: #f8fafc;
 }
 
+.result-sub {
+  margin: -12px 0 20px 0;
+  font-size: 0.95rem;
+  color: var(--text-muted);
+}
+
 .result-stats {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -920,7 +926,7 @@ body {
 .mode-selection-card {
   max-width: 580px;
   width: 100%;
-  padding: 36px;
+  padding: 32px 36px;
   background: rgba(24, 40, 66, 0.98);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 24px;
@@ -937,47 +943,84 @@ body {
 .subtitle {
   color: var(--text-muted);
   margin-top: 0;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
   font-size: 0.95rem;
 }
 
 .mode-desc {
-  font-size: 0.9rem;
+  font-size: 0.88rem;
+  font-weight: 600;
   color: var(--text-muted);
-  margin: 0 0 12px 0;
+  margin: 0 0 10px 0;
 }
 
-.difficulty-buttons {
+.setup-buttons {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
+  margin-bottom: 18px;
 }
 
-.diff-button {
+.setup-button {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 14px 10px;
+  padding: 12px 10px;
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  border: 1.5px solid rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+  transform: translateY(0);
+  transition: transform 0.15s, background 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.setup-button:hover {
+  transform: translateY(-2px);
+  background: rgba(255, 255, 255, 0.11);
+}
+
+.setup-button.selected {
+  background: rgba(244, 211, 94, 0.16);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(244, 211, 94, 0.35), 0 8px 20px rgba(0, 0, 0, 0.28);
+}
+
+.setup-button strong {
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.setup-button.selected strong {
+  color: var(--accent);
+}
+
+.setup-button span {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.setup-button.selected span {
+  color: var(--text);
+}
+
+.start-game-btn {
+  width: 100%;
+  margin-top: 4px;
+  padding: 14px 28px;
+  font-size: 1.05rem;
+  font-weight: 800;
+  border-radius: 12px;
+  border: none;
   cursor: pointer;
   transform: translateY(0);
   transition: transform 0.15s, filter 0.15s;
 }
 
-.diff-button:hover {
+.start-game-btn:hover {
   transform: translateY(-2px);
   filter: brightness(1.08);
-}
-
-.diff-button strong {
-  font-size: 0.95rem;
-}
-
-.diff-button span {
-  font-size: 0.72rem;
-  opacity: 0.8;
-  margin-top: 2px;
 }
 
 .mode-selection-card .disclaimer {

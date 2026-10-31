@@ -70,9 +70,15 @@ const els = {
   confirmButton: document.getElementById('confirm-button'),
   resultPanel: document.getElementById('result-panel'),
   modeSelectionScreen: document.getElementById('mode-selection-screen'),
+  difficultyButtons: document.getElementById('difficulty-buttons'),
   aiCasualButton: document.getElementById('ai-casual-button'),
   aiTacticalButton: document.getElementById('ai-tactical-button'),
   aiMasterButton: document.getElementById('ai-master-button'),
+  starterButtons: document.getElementById('starter-buttons'),
+  starterHumanButton: document.getElementById('starter-human-button'),
+  starterAiButton: document.getElementById('starter-ai-button'),
+  starterRandomButton: document.getElementById('starter-random-button'),
+  startGameButton: document.getElementById('start-game-button'),
   roundBadge: document.getElementById('round-badge'),
   confirmModal: document.getElementById('confirm-modal'),
   confirmCancelButton: document.getElementById('confirm-cancel-button'),
@@ -80,6 +86,7 @@ const els = {
 };
 
 let aiDifficulty = 'medium';
+let startingPlayerPref = HUMAN; // 1 (HUMAN) | 2 (AI_PLAYER) | 'random'
 let pendingAction = null;   // { type, selected: number[], max }
 let pendingOffer = null;    // { kind:'gift'|'competition', offerer:1|2, cards:number[], revealed:boolean,
                             //   interactive:boolean, chosen:number|null, hidden:Set<number>, resolve:Function|null }
@@ -106,6 +113,20 @@ function openConfirmModal() {
 
 function closeConfirmModal() {
   els.confirmModal.classList.add('hidden');
+}
+
+function updateSetupSelectionUI() {
+  els.difficultyButtons.querySelectorAll('[data-diff]').forEach((btn) => {
+    const active = btn.dataset.diff === aiDifficulty;
+    btn.classList.toggle('selected', active);
+    btn.setAttribute('aria-pressed', String(active));
+  });
+  els.starterButtons.querySelectorAll('[data-starter]').forEach((btn) => {
+    const val = btn.dataset.starter === 'random' ? 'random' : Number(btn.dataset.starter);
+    const active = val === startingPlayerPref;
+    btn.classList.toggle('selected', active);
+    btn.setAttribute('aria-pressed', String(active));
+  });
 }
 
 /* --- Helpers --- */
@@ -473,11 +494,17 @@ function buildResultPanel() {
     winnerText = '🤖 Computer won!';
   }
 
+  const nextStarter = Game.other(result.roundStarter);
+  const nextStarterNote = isTie
+    ? `<p class="result-sub">${nextStarter === HUMAN ? 'You go' : 'Computer goes'} first in Round ${result.round + 1}.</p>`
+    : '';
+
   const card = document.createElement('div');
   card.className = 'result-card';
   card.innerHTML = `
     <h2>${headingText}</h2>
     <div class="result-winner">${winnerText}</div>
+    ${nextStarterNote}
     <div class="result-stats">
       <div class="result-col">
         <h3>You</h3>
@@ -1099,33 +1126,7 @@ function resetUIState() {
   resultReady = false;
 }
 
-function showModeSelection() {
-  gameStarted = false;
-  closeConfirmModal();
-  resetUIState();
-  Game.resetGame();
-  els.modeSelectionScreen.classList.remove('hidden');
-  renderHistory(false);
-  render();
-}
-
-function startNewGame(difficulty) {
-  closeConfirmModal();
-  resetUIState();
-  gameStarted = true;
-  aiDifficulty = difficulty;
-  els.modeSelectionScreen.classList.add('hidden');
-  Game.startGame();
-  renderHistory(false);
-  render();
-}
-
-async function beginNextRound() {
-  if (!Game.state.gameOver || Game.state.winner !== 0) return;
-  closeConfirmModal();
-  resetUIState();
-  gameStarted = true;
-  Game.startNextRound();
+async function kickoffRound() {
   renderHistory(false);
 
   if (Game.state.currentPlayer === AI_PLAYER) {
@@ -1148,6 +1149,35 @@ async function beginNextRound() {
   }
 }
 
+function showModeSelection() {
+  gameStarted = false;
+  closeConfirmModal();
+  resetUIState();
+  Game.resetGame();
+  updateSetupSelectionUI();
+  els.modeSelectionScreen.classList.remove('hidden');
+  renderHistory(false);
+  render();
+}
+
+async function startNewGame() {
+  closeConfirmModal();
+  resetUIState();
+  gameStarted = true;
+  els.modeSelectionScreen.classList.add('hidden');
+  Game.startGame(startingPlayerPref);
+  await kickoffRound();
+}
+
+async function beginNextRound() {
+  if (!Game.state.gameOver || Game.state.winner !== 0) return;
+  closeConfirmModal();
+  resetUIState();
+  gameStarted = true;
+  Game.startNextRound();
+  await kickoffRound();
+}
+
 function handleRestartClick() {
   if (gameStarted) {
     openConfirmModal();
@@ -1161,9 +1191,22 @@ export function startApp() {
   window.addEventListener('resize', fitStage);
   showModeSelection();
 
-  els.aiCasualButton.addEventListener('click', () => startNewGame('easy'));
-  els.aiTacticalButton.addEventListener('click', () => startNewGame('medium'));
-  els.aiMasterButton.addEventListener('click', () => startNewGame('hard'));
+  els.difficultyButtons.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-diff]');
+    if (!btn) return;
+    aiDifficulty = btn.dataset.diff;
+    updateSetupSelectionUI();
+  });
+
+  els.starterButtons.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-starter]');
+    if (!btn) return;
+    const raw = btn.dataset.starter;
+    startingPlayerPref = raw === 'random' ? 'random' : Number(raw);
+    updateSetupSelectionUI();
+  });
+
+  els.startGameButton.addEventListener('click', () => startNewGame());
   els.restartButton.addEventListener('click', handleRestartClick);
 
   els.confirmCancelButton.addEventListener('click', closeConfirmModal);

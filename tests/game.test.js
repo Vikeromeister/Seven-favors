@@ -185,6 +185,7 @@ test('Full round: 8 turns triggers endgame scoring', () => {
   assert.ok(typeof summary.player1.geishaCount === 'number');
   assert.ok(typeof summary.player2.geishaCount === 'number');
   assert.equal(summary.round, 1);
+  assert.equal(summary.roundStarter, 1);
 });
 
 test('Multi-round tie continuation preserves geishalove and alternates starting player', () => {
@@ -247,4 +248,98 @@ test('Multi-round tie continuation preserves geishalove and alternates starting 
   // Guard: cannot start next round if there is a winner
   Game.state.gameOver = true;
   assert.equal(Game.startNextRound(), false);
+});
+
+test('Selectable starting player (1, 2, random), full round with Player 2 starting, and deterministic starter alternation', () => {
+  // Explicit Player 1 start
+  Game.startGame(1);
+  assert.equal(Game.state.round, 1);
+  assert.equal(Game.state.roundStarter, 1);
+  assert.equal(Game.state.currentPlayer, 1);
+  assert.equal(Game.getHand(1).length, 7);
+  assert.equal(Game.getHand(2).length, 6);
+  assert.equal(Game.state.deck.length, 8);
+
+  // Explicit Player 2 start + full 8-turn round completion
+  Game.startGame(2);
+  assert.equal(Game.state.round, 1);
+  assert.equal(Game.state.roundStarter, 2);
+  assert.equal(Game.state.currentPlayer, 2);
+  assert.equal(Game.getHand(2).length, 7);
+  assert.equal(Game.getHand(1).length, 6);
+  assert.equal(Game.state.deck.length, 8);
+
+  assert.equal(Game.performSecret(2, 0), true);
+  assert.equal(Game.state.currentPlayer, 1);
+  assert.equal(Game.performSecret(1, 0), true);
+  assert.equal(Game.state.currentPlayer, 2);
+  assert.equal(Game.performTradeoff(2, [0, 1]), true);
+  assert.equal(Game.performTradeoff(1, [0, 1]), true);
+  assert.equal(Game.performGift(2, [0, 1, 2], 0), true);
+  assert.equal(Game.performGift(1, [0, 1, 2], 0), true);
+  assert.equal(Game.performCompetition(2, [0, 1, 2, 3], 1), true);
+  assert.equal(Game.performCompetition(1, [0, 1, 2, 3], 1), true);
+
+  assert.equal(Game.state.turnsTaken, 8);
+  assert.equal(Game.state.gameOver, true);
+  assert.equal(Game.getResultSummary().roundStarter, 2);
+
+  // Deterministic 2 -> 1 -> 2 alternation across tied rounds
+  Game.startGame(2);
+  Game.state.geishagifts[1] = [0, 2, 0, 0, 0, 0, 0, 0];
+  Game.state.geishagifts[2] = [0, 0, 2, 0, 0, 0, 0, 0];
+  Game.state.secretCard = [null, null, null];
+  Game.state.turnsTaken = 8;
+  Game.computeEndgame();
+  Game.state.gameOver = true;
+  assert.equal(Game.state.winner, 0);
+
+  assert.equal(Game.startNextRound(), true);
+  assert.equal(Game.state.round, 2);
+  assert.equal(Game.state.roundStarter, 1);
+  assert.equal(Game.state.currentPlayer, 1);
+  assert.equal(Game.getHand(1).length, 7);
+  assert.equal(Game.getHand(2).length, 6);
+
+  // Tie again in Round 2 -> Round 3 alternates back to Player 2
+  Game.state.turnsTaken = 8;
+  Game.computeEndgame();
+  Game.state.gameOver = true;
+  assert.equal(Game.state.winner, 0);
+
+  assert.equal(Game.startNextRound(), true);
+  assert.equal(Game.state.round, 3);
+  assert.equal(Game.state.roundStarter, 2);
+  assert.equal(Game.state.currentPlayer, 2);
+  assert.equal(Game.getHand(2).length, 7);
+  assert.equal(Game.getHand(1).length, 6);
+
+  // Random starter resolves to concrete 1 or 2 and alternates deterministically thereafter
+  for (let i = 0; i < 30; i++) {
+    Game.startGame('random');
+    const r1Starter = Game.state.roundStarter;
+    assert.ok(r1Starter === 1 || r1Starter === 2);
+    assert.equal(Game.state.currentPlayer, r1Starter);
+    assert.equal(Game.getHand(r1Starter).length, 7);
+    assert.equal(Game.getHand(Game.other(r1Starter)).length, 6);
+
+    Game.state.geishagifts[1] = [0, 2, 0, 0, 0, 0, 0, 0];
+    Game.state.geishagifts[2] = [0, 0, 2, 0, 0, 0, 0, 0];
+    Game.state.secretCard = [null, null, null];
+    Game.state.turnsTaken = 8;
+    Game.computeEndgame();
+    Game.state.gameOver = true;
+
+    assert.equal(Game.startNextRound(), true);
+    assert.equal(Game.state.roundStarter, Game.other(r1Starter));
+    assert.equal(Game.state.currentPlayer, Game.other(r1Starter));
+
+    Game.state.turnsTaken = 8;
+    Game.computeEndgame();
+    Game.state.gameOver = true;
+
+    assert.equal(Game.startNextRound(), true);
+    assert.equal(Game.state.roundStarter, r1Starter);
+    assert.equal(Game.state.currentPlayer, r1Starter);
+  }
 });

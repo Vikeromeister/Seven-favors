@@ -15,6 +15,7 @@ Compete online or locally against an AI engine featuring **3 difficulty levels**
   - **Master (Hard):** Card counting, minimax partition for Competition, maximin evaluation for Gift offers, and strategic win-condition / threat mitigation.
 - **Viewport-Scaled Tabletop Stage:** Fixed 1760×900 presentation scaled smoothly to fit any viewport with zero scrolling, custom card artwork, hover-to-peek secret slots, and icon actions with tooltips.
 - **Animated Card Flights & History Rail:** Web Animations API 3D card flights and flips for every draw, secret, discard, offer, and endgame reveal, paired with a colour-coded move history rail (blue = You, red = Computer).
+- **Flexible Match Setup:** Choose your AI opponent (`Casual`, `Tactical`, or `Master`) and Round 1 starting player (`You`, `Computer`, or `Random`) before launching each game.
 - **Visual Competition Pairing:** Real-time `1` and `2` pair badges on selected hand cards so you control exact competition splits.
 - **Automated Test Suite:** Built-in unit and simulation tests using Node.js's native test runner (`node:test`).
 
@@ -43,7 +44,7 @@ After 8 total turns (4 per player), all secret cards are revealed and character 
 - A player wins if they achieve **11 or more Charm Points** OR the favor of **4 or more Characters**.
 - **Precedence Rule:** If one player achieves 11+ Charm Points and the other achieves 4+ Characters, the player with **11+ Charm Points wins**.
 - Tiebreaker falls back to the higher total Charm Points.
-- **Tied Rounds & Multi-Round Play:** If neither player meets a victory condition at the end of the round, the round ends in a tie. All character favor states are preserved, and players can launch Round 2 (and subsequent rounds) upon approval, alternating the starting player, until someone wins.
+- **Starting Player & Multi-Round Play:** Before starting a new game, you can select whether **You**, **Computer**, or **Random** goes first in Round 1. If neither player meets a victory condition after 8 turns, the round ends in a tie: all character favor states carry over, the starting player alternates cleanly from the prior round's starter, and you can launch the next round upon approval until someone wins.
 - **New Game Confirmation:** If a game is in progress, clicking the New Game button displays a confirmation dialog to prevent accidental restarts.
 
 ---

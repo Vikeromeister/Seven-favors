@@ -87,6 +87,20 @@ function recomputeScoresFromLove() {
   }
 }
 
+/**
+ * @param {1 | 2 | 'random'} [startingPlayer=1]
+ * @returns {1 | 2}
+ */
+function resolveStarter(startingPlayer = 1) {
+  if (startingPlayer === 1 || startingPlayer === 2) {
+    return startingPlayer;
+  }
+  if (startingPlayer === 'random') {
+    return Math.random() < 0.5 ? 1 : 2;
+  }
+  return 1;
+}
+
 function dealRound(starter) {
   state.deck = shuffle(INITIAL_DECK);
   state.roundStarter = starter;
@@ -105,14 +119,15 @@ function dealRound(starter) {
   state.winner = 0;
 }
 
-export function resetGame() {
+export function resetGame(startingPlayer = 1) {
+  const starter = resolveStarter(startingPlayer);
   state.round = 1;
-  dealRound(1);
+  dealRound(starter);
   state.geishalove = Array(8).fill(0);
   state.priorGeishaLove = Array(8).fill(0);
   state.scores = [0, 0, 0];
   state.geishaCount = [0, 0, 0];
-  state.message = 'The game has started. Player 1 goes first.';
+  state.message = `The game has started. Player ${starter} goes first.`;
 }
 
 export function startNextRound() {
@@ -131,8 +146,8 @@ export function startNextRound() {
   return true;
 }
 
-export function startGame() {
-  resetGame();
+export function startGame(startingPlayer = 1) {
+  resetGame(startingPlayer);
   drawCard(state.currentPlayer);
 }
 
@@ -348,6 +363,7 @@ export function getResultSummary() {
       secretCard: state.secretCard[2]
     },
     winner: state.winner,
-    round: state.round
+    round: state.round,
+    roundStarter: state.roundStarter
   };
 }
