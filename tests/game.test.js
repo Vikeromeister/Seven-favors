@@ -343,3 +343,44 @@ test('Selectable starting player (1, 2, random), full round with Player 2 starti
     assert.equal(Game.state.currentPlayer, r1Starter);
   }
 });
+
+test('Strict win condition: victory requires 11+ points or 4+ geishas; unequal points below 11 and <4 geishas continue to next round', () => {
+  Game.startGame();
+  // Player 1 has Geishas 7 and 6 -> 5 + 4 = 9 points, 2 geishas
+  // Player 2 has Geishas 5 and 4 -> 3 + 3 = 6 points, 2 geishas
+  // Geishas 1, 2, 3 tied with 0 gifts
+  Game.state.geishagifts[1] = [0, 0, 0, 0, 0, 0, 4, 5];
+  Game.state.geishagifts[2] = [0, 0, 0, 0, 3, 3, 0, 0];
+  Game.state.secretCard = [null, null, null];
+  Game.state.turnsTaken = 8;
+  Game.computeEndgame();
+  Game.state.gameOver = true;
+
+  assert.equal(Game.state.scores[1], 9);
+  assert.equal(Game.state.scores[2], 6);
+  assert.equal(Game.state.geishaCount[1], 2);
+  assert.equal(Game.state.geishaCount[2], 2);
+  // Unequal score (9 vs 6), but neither reached 11 points or 4 geishas: must NOT end game!
+  assert.equal(Game.state.winner, 0);
+
+  // Can start next round
+  assert.equal(Game.startNextRound(), true);
+  assert.equal(Game.state.round, 2);
+
+  // 11+ points grants victory with only 3 geishas
+  Game.state.geishagifts[1] = [0, 2, 0, 0, 0, 0, 4, 5]; // 2 + 4 + 5 = 11 pts, 3 geishas
+  Game.state.geishagifts[2] = [0, 0, 2, 0, 0, 0, 0, 0]; // 2 pts, 1 geisha
+  Game.computeEndgame();
+  assert.equal(Game.state.scores[1], 11);
+  assert.equal(Game.state.geishaCount[1], 3);
+  assert.equal(Game.state.winner, 1);
+
+  // 4 geishas grants victory with fewer than 11 points
+  Game.resetGame();
+  Game.state.geishagifts[1] = [0, 0, 0, 0, 0, 0, 0, 5]; // 5 pts, 1 geisha
+  Game.state.geishagifts[2] = [0, 2, 2, 2, 3, 0, 0, 0]; // 2+2+2+3 = 9 pts, 4 geishas
+  Game.computeEndgame();
+  assert.equal(Game.state.scores[2], 9);
+  assert.equal(Game.state.geishaCount[2], 4);
+  assert.equal(Game.state.winner, 2);
+});

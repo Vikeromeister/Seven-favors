@@ -77,12 +77,14 @@
 
           <p class="mode-desc">Game mode:</p>
           <div id="game-mode-buttons" class="setup-buttons two-col" role="group" aria-label="Game mode">
-            <button id="mode-ai-button" class="setup-button selected" type="button" data-mode="ai" aria-pressed="true">
+            <button id="mode-ai-button" class="setup-button mode-choice-btn selected" type="button" data-mode="ai" aria-pressed="true">
+              <svg class="mode-btn-icon" aria-hidden="true"><use href="#icon-single-player"/></svg>
               <strong>Single Player</strong>
               <span>Play vs Computer</span>
             </button>
-            <button id="mode-online-button" class="setup-button" type="button" data-mode="online" aria-pressed="false">
-              <strong>Online 2P</strong>
+            <button id="mode-online-button" class="setup-button mode-choice-btn" type="button" data-mode="online" aria-pressed="false">
+              <svg class="mode-btn-icon" aria-hidden="true"><use href="#icon-two-player"/></svg>
+              <strong>Online Two Player</strong>
               <span>Play over the internet</span>
             </button>
           </div>
@@ -171,10 +173,11 @@
 
       <div id="disconnect-modal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="disconnect-modal-title">
         <div class="confirm-modal-card">
-          <h2 id="disconnect-modal-title">Opponent Disconnected</h2>
-          <p id="disconnect-modal-desc" class="confirm-modal-desc">Your opponent left the match or lost connection.</p>
+          <h2 id="disconnect-modal-title">Connection Lost</h2>
+          <p id="disconnect-modal-desc" class="confirm-modal-desc">Connection to opponent was interrupted.</p>
           <div class="confirm-modal-actions">
-            <button id="disconnect-ok-button" class="modal-btn primary" type="button">Back to Menu</button>
+            <button id="disconnect-reconnect-button" class="modal-btn primary" type="button">Reconnect</button>
+            <button id="disconnect-ok-button" class="modal-btn secondary" type="button">Back to Menu</button>
           </div>
         </div>
       </div>
@@ -199,6 +202,10 @@
         <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></symbol>
       <symbol id="icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-6.4 0-10-7-10-7a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c6.4 0 10 7 10 7a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="2" y1="2" x2="22" y2="22"/></symbol>
+      <symbol id="icon-single-player" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="8" r="4"/><path d="M5 20a7 7 0 0 1 14 0"/></symbol>
+      <symbol id="icon-two-player" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="16.5" cy="9" r="3"/><path d="M16.5 14.5a5.5 5.5 0 0 1 5 5.5"/></symbol>
     </defs>
   </svg>
   <script type="module" src="src/main.js"></script>

@@ -100,10 +100,11 @@ npm test
      - `competition` (4 cards): Split into Pair 1 (`[0, 1]`) and Pair 2 (`[2, 3]`); opponent picks 1 pair, active player receives the other.
    - **Endgame & Scoring Rules (`computeEndgame()`):**
      - Evaluated after 8 total turns (4 per player).
+     - **Strict Victory Conditions:** A game **strictly** requires at least 11 Charm Points OR the favor of 4 or more Characters to win.
      - **Precedence Rule:** If one player achieves 11+ Charm Points and the other achieves 4+ Characters, the player with 11+ Charm Points wins.
      - Otherwise, achieving 4+ Characters wins.
-     - If neither reaches the threshold, tiebreaker falls back to highest charm points or tie (`0`).
-     - **Multi-Round Tie Continuation:** If a round ends in a tie (`winner === 0`), `state.geishalove` is preserved. `startNextRound()` resets the deck, hands, and actions while keeping character favor states and alternating the starting player (`roundStarter`). Additional rounds continue until a player wins.
+     - If neither reaches either threshold, the round ends with no winner (`winner = 0`). There is no high-score fallback.
+     - **Multi-Round Tie Continuation:** Whenever a round ends without a winner (`winner === 0`), `state.geishalove` is preserved. `startNextRound()` resets the deck, hands, and actions while keeping character favor states and alternating the starting player (`roundStarter`). Additional rounds continue until a player achieves a win condition.
 
 2. **`docs/src/ai.js` (Artificial Intelligence Engine)**
    - Pure, DOM-free AI decision engine supporting 3 difficulties:
@@ -122,15 +123,15 @@ npm test
    - Lazy-loads PeerJS from CDN on demand (leaving offline Single Player 100% offline-capable and tests dependency-free with injectable mock peers).
 
 5. **`docs/src/ui.js` (Presentation, Interaction, Turn Sequencing & Online Multiplayer)**
-   - Single-player and Online 2P presentation layer managing UI state (`gameMode`, `localSeat`, `aiDifficulty`, `startingPlayerPref`, `pendingAction`, `pendingOffer`, `history`, `animating`, `hiddenDraw`, `revealDone`, `resultReady`, `gameToken`, `currentScale`, `gameStarted`, `netSession`) and re-rendering via `render()`.
-   - Pre-game setup screen lets the player choose between Single Player (`Easy`, `Medium`, `Hard`) and Online 2P (`Host Room` with 6-char code & `?room=` link, or `Join Room`), with Round 1 starting player defaulting to `Random` (Coin toss).
+   - Single-player and Online Two Player presentation layer managing UI state (`gameMode`, `localSeat`, `aiDifficulty`, `startingPlayerPref`, `pendingAction`, `pendingOffer`, `history`, `animating`, `hiddenDraw`, `revealDone`, `resultReady`, `gameToken`, `currentScale`, `gameStarted`, `netSession`) and re-rendering via `render()`.
+   - Pre-game setup screen lets the player choose between Single Player (`Easy`, `Medium`, `Hard`) and Online Two Player (`Host Room` with 6-char code & `?room=` link, or `Join Room`), with 1P and 2P visual SVG icons, and Round 1 starting player defaulting to `Random` (Coin toss). Abandoning an online match cleanly resets lobby state so the host sees the `Create Room` button ready to host a new game.
    - Symmetrically renders the board from the local player's perspective (`localSeat` / `oppSeat()`), placing the local player at the bottom with blue accents and the opponent at the top with red accents.
-   - Manages serialized turn queue (`enqueueNetTurn`) and out-of-band signals for smooth online animations across browsers with differing `prefers-reduced-motion` settings.
+   - Manages serialized turn queue (`enqueueNetTurn`) with atomic single-message non-interactive turns (`remote_turn`), buffered out-of-band signals, and rejectable signal/offer promises so turns never stall or deadlock.
    - Scales the fixed `1760×900` `#stage` via `--stage-scale` (`fitStage()`) so the interface fills the viewport without scrolling.
    - Renders a left-hand move history rail colour-coded by actor (**blue** = player, **red** = opponent/computer), newest move on top, with hover popouts showing card destinations.
    - Competition selection displays `1` and `2` pair badges on selected cards; endgame reveal animates secret cards onto stacks and shows `▼ You` / `▲ AI` (or `▲ Opp`) favor markers and the result summary.
-   - **Round Continuation & Online Ready Handshake:** Tie rounds and rematches support a mutual ready handshake between players before the host initiates the next round. Disconnects trigger a recovery modal (`#disconnect-modal`).
-   - **View Board Peek Mode:** Interactive pop-up overlays (AI/opponent Gift/Competition offer tray and the end-of-round result panel) include a **View Board** button supporting both press-and-hold to peek and click/keyboard toggle (`#peek-restore-button`) so the player can inspect un-dimmed character columns, secret slots, and the move history rail at any time without accidental input.
+   - **Round Continuation, Reconnection & Online Ready Handshake:** Tie rounds and rematches support a mutual ready handshake between players before the host initiates the next round. Network drops trigger a `#disconnect-modal` offering both automated and manual Reconnect via `match_sync` state restoration and per-tab `clientId` replacement.
+   - **Persistent View Board Peek Mode:** The **View Board** button sits in a non-blocking open corridor on the right side of the board (`left: 1468px; top: 426px`) and persists in the exact same spot whether the offer is hidden or shown, supporting rapid toggle clicking back-and-forth between offer choices and the un-dimmed board as well as press-and-hold peeking and keyboard accessibility.
 
 6. **`docs/src/styles.css` (Styling & Layout)**
    - Fixed-stage `1760×900` grid layout scaled by `--stage-scale`, zero page scrolling (`overflow: hidden`).

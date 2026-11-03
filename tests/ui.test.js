@@ -13,6 +13,8 @@ test('index.html contains peek restore button, default random starter, and onlin
   assert.ok(html.includes('id="peek-restore-button"'), 'Missing #peek-restore-button in index.html');
   assert.ok(html.includes('id="icon-eye"'), 'Missing #icon-eye in index.html');
   assert.ok(html.includes('id="icon-eye-off"'), 'Missing #icon-eye-off in index.html');
+  assert.ok(html.includes('id="icon-single-player"'), 'Missing #icon-single-player in index.html');
+  assert.ok(html.includes('id="icon-two-player"'), 'Missing #icon-two-player in index.html');
 
   // Verify starting player defaults to random
   assert.ok(
@@ -30,12 +32,14 @@ test('index.html contains peek restore button, default random starter, and onlin
   assert.ok(html.includes('id="ai-hard-button"'), 'Missing #ai-hard-button in index.html');
   assert.ok(html.includes('Medium AI'), 'Expected Medium AI in difficulty badge in index.html');
 
-  // Verify Online 2P markup
+  // Verify Online Two Player markup
   assert.ok(html.includes('id="mode-ai-button"'), 'Missing #mode-ai-button in index.html');
   assert.ok(html.includes('id="mode-online-button"'), 'Missing #mode-online-button in index.html');
+  assert.ok(html.includes('Online Two Player'), 'Expected Online Two Player button label in index.html');
   assert.ok(html.includes('id="create-room-button"'), 'Missing #create-room-button in index.html');
   assert.ok(html.includes('id="join-room-button"'), 'Missing #join-room-button in index.html');
   assert.ok(html.includes('id="disconnect-modal"'), 'Missing #disconnect-modal in index.html');
+  assert.ok(html.includes('id="disconnect-reconnect-button"'), 'Missing #disconnect-reconnect-button in index.html');
 });
 
 test('styles.css contains peek classes, perspective-safe stack badges, and online setup styling', () => {
@@ -45,10 +49,13 @@ test('styles.css contains peek classes, perspective-safe stack badges, and onlin
   assert.ok(css.includes('.stage.is-peeking .result-panel'), 'Missing .stage.is-peeking .result-panel in styles.css');
   assert.ok(css.includes('.stage.is-peeking .board-row.offer-active .board'), 'Missing .stage.is-peeking un-dimming rule in styles.css');
   assert.ok(css.includes('.peek-restore-btn'), 'Missing .peek-restore-btn in styles.css');
+  assert.ok(css.includes('.peek-restore-btn.peek-closed'), 'Missing .peek-restore-btn.peek-closed in styles.css');
+  assert.ok(css.includes('top: 426px;'), 'Expected .peek-restore-btn to have top: 426px in styles.css');
+  assert.ok(css.includes('left: 1468px;'), 'Expected .peek-restore-btn to have left: 1468px in styles.css');
   assert.ok(css.includes('.peek-trigger-btn'), 'Missing .peek-trigger-btn in styles.css');
-  assert.ok(css.includes('.tray-peek-btn'), 'Missing .tray-peek-btn in styles.css');
   assert.ok(css.includes('.result-peek-btn'), 'Missing .result-peek-btn in styles.css');
   assert.ok(css.includes('.result-actions'), 'Missing .result-actions in styles.css');
+  assert.ok(css.includes('.mode-btn-icon'), 'Missing .mode-btn-icon in styles.css');
 
   // Verify that tray-head icon selector is scoped with direct child to avoid corrupting peek button icons
   assert.ok(css.includes('.offer-tray .tray-head > .icon'), 'Expected .offer-tray .tray-head > .icon to be scoped');
@@ -72,9 +79,12 @@ test('ui.js wires peek state, default random starter, renamed AI diffs, and onli
   assert.ok(js.includes('latchPeek'), 'Missing latchPeek helper in ui.js');
   assert.ok(js.includes('stopPeek'), 'Missing stopPeek helper in ui.js');
   assert.ok(js.includes('handlePeekPointerEnd'), 'Missing handlePeekPointerEnd helper in ui.js');
-  assert.ok(js.includes('tray-peek-btn'), 'Missing tray-peek-btn rendering in ui.js');
   assert.ok(js.includes('result-peek-btn'), 'Missing result-peek-btn rendering in ui.js');
   assert.ok(js.includes('peekRestoreButton'), 'Missing peekRestoreButton element ref in ui.js');
+  assert.ok(js.includes('resetOnlineLobbyUI'), 'Missing resetOnlineLobbyUI in ui.js');
+  assert.ok(js.includes('remote_turn'), 'Missing remote_turn handling in ui.js');
+  assert.ok(js.includes('match_sync'), 'Missing match_sync handling in ui.js');
+  assert.ok(js.includes('attemptOnlineReconnect'), 'Missing attemptOnlineReconnect in ui.js');
 
   // Verify default random starter
   assert.ok(js.includes("startingPlayerPref = 'random'"), 'startingPlayerPref must default to random in ui.js');

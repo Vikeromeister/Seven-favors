@@ -827,36 +827,47 @@ body {
 
 .peek-restore-btn {
   position: absolute;
-  top: 10px;
-  left: 50%;
-  translate: -50% 0;
+  top: 426px;
+  left: 1468px;
+  translate: -50% -50%;
   z-index: 115;
+  min-width: 172px;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  padding: 9px 20px;
+  padding: 11px 20px;
   border-radius: 9999px;
-  border: none;
+  border: 1.5px solid rgba(244, 211, 94, 0.55);
   font-size: 0.92rem;
   font-weight: 800;
   cursor: pointer;
-  box-shadow: 0 0 0 3px rgba(244, 211, 94, 0.32), 0 10px 24px rgba(0, 0, 0, 0.55);
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  box-shadow: 0 0 0 3px rgba(244, 211, 94, 0.22), 0 12px 28px rgba(0, 0, 0, 0.6);
   transform: translateY(0);
-  transition: transform 0.15s, filter 0.15s;
+  transition: transform 0.15s, filter 0.15s, background 0.15s, color 0.15s;
+}
+
+.peek-restore-btn.peek-closed {
+  background: rgba(15, 23, 42, 0.94);
+  color: var(--text);
+}
+
+.peek-restore-btn.peek-closed .icon {
+  color: var(--accent);
 }
 
 .peek-restore-btn .icon {
   width: 18px;
   height: 18px;
+  flex-shrink: 0;
 }
 
 .peek-restore-btn:hover {
   transform: translateY(-1px);
   filter: brightness(1.08);
-}
-
-.peek-restore-btn.holding {
-  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1116,6 +1127,22 @@ body {
 
 .setup-button.selected span {
   color: var(--text);
+}
+
+.mode-btn-icon {
+  width: 28px;
+  height: 28px;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  transition: color 0.15s, transform 0.15s;
+}
+
+.setup-button:hover .mode-btn-icon {
+  color: var(--text);
+}
+
+.setup-button.selected .mode-btn-icon {
+  color: var(--accent);
 }
 
 /* Online 2P Setup Styles */

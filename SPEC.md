@@ -1,432 +1,630 @@
-# SPEC — Default Coin Toss Starter, Easy/Medium/Hard AI Labels & Online Two-Player Mode
+# SPEC — Online Two Player Stabilization & Reconnect, Strict Win Condition, Lobby Reset & Persistent View Board Toggle
 
 ## Root Cause / Objective
-The pre-game setup currently defaults the Round 1 starting player to `You` (`startingPlayerPref = 1`), labels AI difficulties as `Casual`/`Tactical`/`Master`, and only supports local single-player matches against the AI. We must make `Random` (Coin toss) the default starting player selection, rename the AI difficulty labels across the UI and docs to `Easy`, `Medium`, and `Hard`, and add a zero-backend **Online Two-Player Mode** over WebRTC DataChannels (PeerJS with room codes, shareable `?room=` invite links, host-authoritative hidden-information sanitization, perspective-flipped board rendering, and optional TURN configuration guidance).
+Online matches frequently froze or dropped after `secret` or `tradeoff` because Host sent `remote_secret`/`remote_tradeoff` followed ~550ms later by `turn_commit` while Guest registered `waitForNetSignal('turn_commit')` *after* its own ~550ms card flight (dropping early `turn_commit` packets, wedging `turnQueue` because `rejectAllNetSignals()` never rejected pending promises, and stalling Web Animations in background tabs), while `computeEndgame()` erroneously fell back to `scores[1] > scores[2]` when neither player met a victory threshold, `showModeSelection()` left `#host-lobby-box` open with a dead room code after abandoning an online match, and the offer `View Board` button blocked the board and jumped positions when activated. We will rename `Online 2P` to `Online Two Player` with clear 1P/2P SVG icons, harden WebRTC/turn synchronization with atomic single-message non-interactive turns, background-safe animations, automatic + manual match reconnection (`match_sync`), reset abandoned Host lobbies back to the `Create Room` state, enforce the strict 4+ Geishas / 11+ Charm Points victory rule, and move `View Board` to a single non-blocking persistent toggle spot for effortless repeated clicking.
 
 ## File Map
 | Path | Operation | Purpose |
 |---|---|---|
-| `docs/src/net-config.js` | Create | Pure JS WebRTC/PeerJS signaling, room prefix, timeout/heartbeat, and STUN/optional-TURN configuration. |
-| `docs/src/net.js` | Create | DOM-safe WebRTC P2P session manager (lazy CDN PeerJS loader in browser, injectable `PeerClass` for Node tests, 6-char room codes, heartbeat, single-guest guard). |
-| `docs/src/game.js` | Modify | Export `buildPlayerView(viewerSeat)` and `applyPlayerView(view)` for sanitized multiplayer state projection without breaking existing exports/tests. |
-| `docs/index.html` | Modify | Set `#starter-random-button` selected by default, rename AI buttons/badge to `Easy`/`Medium`/`Hard`, add Single Player vs Online 2P setup controls (Host room lobby + Join code input), and add `#disconnect-modal`. |
-| `docs/src/styles.css` | Modify | Replace hardcoded `data-stack^="1-"`/`"2-"` badge selectors with `.stack-bottom`/`.stack-top`, style Online 2P lobby/join controls (`user-select: text` on room codes/inputs), and keep `.mode-selection-card` compact within `1760×900`. |
-| `docs/src/ui.js` | Modify | Default `startingPlayerPref = 'random'`, update `DIFF_LABELS` to `Easy`/`Medium`/`Hard`, generalize seat perspective (`localSeat` / `oppSeat()`), and wire full Online 2P lobby, serialized turn queue, interactive offers, tie-round/rematch ready handshake, and disconnect recovery. |
-| `tests/net.test.js` | Create | Zero-dependency `node:test` suite verifying room codes, mock PeerJS host/guest handshake, `room_full` rejection, `buildPlayerView` hidden-info masking, and full 8-turn + tie-round sync. |
-| `tests/ui.test.js` | Modify | Add contract tests verifying default `Random` starter, `Easy`/`Medium`/`Hard` labels, `.stack-bottom`/`.stack-top` CSS, and Online 2P markup/wiring. |
-| `AGENTS.md` | Modify | Document `Easy`/`Medium`/`Hard` labels, `Random` default starter, `net.js`/`net-config.js`, and Online Two-Player architecture. |
-| `README.md` | Modify | Document Online Two-Player Mode, room codes/invite links, updated difficulty names, and optional TURN setup. |
+| `docs/src/game.js` | Modify | Remove high-score fallback tiebreaker in `computeEndgame()` so `winner` is non-zero strictly when a player reaches `11+` Charm Points or `4+` Geishas (`11+` points beats `4+` geishas; otherwise `winner = 0`). |
+| `docs/src/fx.js` | Modify | Fast-forward `wait()` and `flyCard()` when `document.visibilityState === 'hidden'`, guard `rectOf()` against null/zero-rect elements, and attach a hard completion safety timer to `flyCard()` so backgrounded tabs never hang turn execution. |
+| `docs/src/net-config.js` | Modify | Tighten `pingIntervalMs` to `5000` ms to keep UDP NAT bindings alive and add `pongTimeoutMs: 16000` ms for stale DataChannel detection. |
+| `docs/src/net.js` | Modify | Add per-session `clientId`, signaling `peer.reconnect()` recovery, heartbeat timeout detection, `onConnectionLost` vs intentional `onPeerLeft`, Guest reconnection acceptance on Host (`onGuestReconnected`), and `session.reconnect()`. |
+| `docs/index.html` | Modify | Rename `Online 2P` to `Online Two Player`, add `#icon-single-player` & `#icon-two-player` SVG symbols and button icons, and add `#disconnect-reconnect-button` inside `#disconnect-modal`. |
+| `docs/src/styles.css` | Modify | Style `.mode-btn-icon` on mode buttons, move `#peek-restore-button` to the non-blocking right-board corridor (`left: 1468px; top: 426px`), keep fixed geometry across states, and style secondary/closed vs active peek states. |
+| `docs/src/ui.js` | Modify | Make `#peek-restore-button` a persistent in-place `View Board` / `Show Offer` toggle (removing the inline button from `#offer-tray`), reset Host/Join lobby UI in `showModeSelection()`, eliminate two-message `secret`/`tradeoff` races via atomic `remote_turn`, fix signal/offer promise cancellation, and wire auto + manual `Reconnect` with sanitized `match_sync`. |
+| `tests/game.test.js` | Modify | Add unit tests verifying unequal scores below `< 11` pts and `< 4` geishas yield `winner === 0` (continuing to next round), while `4+` geishas and `11+` points trigger victory properly. |
+| `tests/simulation.test.js` | Modify | Raise multi-round cap to `25` and assert every decisive match winner satisfies `score >= 11 \|\| geishaCount >= 4`. |
+| `tests/net.test.js` | Modify | Add unit tests covering unexpected disconnect (`onConnectionLost`), Guest/Host `reconnect()` (including half-open socket replacement via `clientId`), and `pongTimeoutMs` detection while preserving `room_full` rejection for 3rd players. |
+| `tests/ui.test.js` | Modify | Verify `Online Two Player` label, 1P/2P button icons, `#disconnect-reconnect-button`, `resetOnlineLobbyUI`, atomic `remote_turn` + `match_sync`, and persistent non-blocking `#peek-restore-button`. |
+| `AGENTS.md` | Modify | Update architecture documentation for strict victory condition, `Online Two Player`, reconnection protocol, and persistent `View Board` button. |
+| `README.md` | Modify | Update rules section (removing high-score fallback tiebreaker), `Online Two Player` button labels, and reconnection notes. |
 
 ---
 
 ## Technical Blueprint
 
-### 1. User Setup Guide (What You Need to Set Up)
+### 1. Strict Victory Condition (`docs/src/game.js`)
 
-#### 1.1 Zero Mandatory Setup (Works Out-of-the-Box)
-- **Nothing is required from you to make Online Two-Player Mode work.**
-- By default, `docs/src/net.js` establishes an encrypted browser-to-browser **WebRTC DataChannel** using the free public **PeerJS Cloud** signaling broker (`wss://0.peerjs.com:443`) paired with public **Google & Cloudflare STUN** servers.
--PeerJS (`1.5.4`) is lazy-loaded from jsDelivr (with automatic fallback to unpkg) **only** when a player enters Online Mode, keeping Single Player vs AI 100% offline-capable and `npm test` 100% zero-dependency.
-- **How two players connect:**
-  1. **Host (Player 1):** Selects **Online 2P → Host Game**, leaves or adjusts Starting Player (defaults to **Random / Coin toss**), clicks **Create Room**, and shares either the **6-character Room Code** (e.g. `K7M4P9`) or clicks **Copy Invite Link** (`https://<your-site>/?room=K7M4P9`).
-  2. **Guest (Player 2):** Opens the invite link (which auto-selects Online Join and pre-fills the code) or enters the 6-character code under **Online 2P → Join Game** and clicks **Join Room**. The match launches automatically on both screens.
+In `docs/src/game.js`, replace lines 303–336 (`computeEndgame` win check and `finishGame`) so a game **only** ends with a winner when at least one player controls **4+ Geishas** or **11+ Charm Points** (with 11+ Charm Points taking precedence when one player has 4+ Geishas and the other has 11+ Charm Points):
 
-#### 1.2 GitHub Pages Deployment Check (1 Minute)
-1. In your GitHub repository, open **Settings → Pages**.
-2. Set **Source** to **Deploy from a branch**, select your main branch and the **`/docs`** folder, and click **Save**.
-3. Ensure **Enforce HTTPS** is checked (required by modern browsers for `navigator.clipboard` one-click Copy Invite Link and secure `wss://` signaling).
-
-#### 1.3 Optional Setup: Free TURN Relay for Strict Firewalls / Symmetric Cellular NATs
-Direct WebRTC P2P + STUN connects ~85% of internet pairs directly. If two players are on strict symmetric NATs (e.g., certain mobile 4G/5G networks or corporate firewalls) and see *"Connection timed out"*, you can add a free TURN relay in 2 minutes:
-1. Create a free account at **Metered OpenRelay** (`https://www.metered.ca/tools/openrelay/`) or **Cloudflare Realtime TURN** and copy your TURN `urls`, `username`, and `credential`.
-2. Open `docs/src/net-config.js` and append those TURN entries inside `NET_CONFIG.peerOptions.config.iceServers` (an inline commented template is already provided in `docs/src/net-config.js`). Commit and push to GitHub Pages.
-*(Note: Because `docs/` is a static client-side site, only place free-tier / rate-limited TURN credentials in `net-config.js`.)*
-
----
-
-### 2. Network Configuration & P2P Session Engine (`docs/src/net-config.js` & `docs/src/net.js`)
-
-#### 2.1 `docs/src/net-config.js`
 ```js
-export const NET_CONFIG = {
-  roomPrefix: 'seven-favors-v1-',
-  connectTimeoutMs: 12000,
-  pingIntervalMs: 15000,
-  cdnUrls: [
-    'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js',
-    'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'
-  ],
-  peerOptions: {
-    debug: 0,
-    config: {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun.cloudflare.com:3478' }
-        // Optional TURN server for strict mobile / corporate symmetric NATs:
-        // {
-        //   urls: 'turn:standard.relay.metered.ca:443?transport=tcp',
-        //   username: 'YOUR_TURN_USERNAME',
-        //   credential: 'YOUR_TURN_PASSWORD'
-        // }
-      ]
-    }
+  const p1Points = state.scores[1] >= 11;
+  const p2Points = state.scores[2] >= 11;
+  const p1Geishas = state.geishaCount[1] >= 4;
+  const p2Geishas = state.geishaCount[2] >= 4;
+
+  // Victory requires 11+ Charm Points OR 4+ Geishas.
+  // If one player achieves 11+ Charm Points and the other achieves 4+ Geishas,
+  // the player with 11+ Charm Points wins. Otherwise, no one wins and play
+  // continues to the next round (winner = 0).
+  if (p1Points && !p2Points) {
+    state.winner = 1;
+  } else if (p2Points && !p1Points) {
+    state.winner = 2;
+  } else if (p1Geishas && !p2Geishas) {
+    state.winner = 1;
+  } else if (p2Geishas && !p1Geishas) {
+    state.winner = 2;
+  } else {
+    state.winner = 0;
   }
-};
-```
+}
 
-#### 2.2 `docs/src/net.js` Signatures & Behavior
-- **Constants & Pure Helpers:**
-  - `export const ROOM_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';` (32 unambiguous chars; omits `0`, `O`, `1`, `I`).
-  - `export const ROOM_CODE_LEN = 6;`
-  - `export function normalizeRoomCode(input)`: `String(input ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, ROOM_CODE_LEN)`.
-  - `export function isValidRoomCode(code)`: `/^[A-Z0-9]{6}$/.test(code)`.
-  - `export function generateRoomCode(rng = Math.random)`: picks 6 characters from `ROOM_ALPHABET`.
-  - `export function peerIdForRoom(code)`: `${NET_CONFIG.roomPrefix}${normalizeRoomCode(code)}`.
-- **Lazy Browser Script Loader (`ensurePeerClass(PeerClass)`):**
-  - If `PeerClass` is provided (e.g. in `tests/net.test.js`), return `PeerClass`.
-  - If `globalThis.Peer` exists, return `globalThis.Peer`.
-  - Otherwise iterate `NET_CONFIG.cdnUrls`, injecting `<script src="..." async></script>` into `document.head` and resolving `globalThis.Peer` once loaded; throw `new Error('Could not load networking library. Check your internet connection.')` if all URLs fail.
-- **Session Factory `export function createNetSession(handlers = {}, options = {})`:**
-  - `handlers`: `{ onGuestJoined, onJoinedHost, onMessage, onPeerLeft, onError }`
-  - `options`: `{ PeerClass = null, connectTimeoutMs = NET_CONFIG.connectTimeoutMs, pingIntervalMs = NET_CONFIG.pingIntervalMs }`
-  - Methods:
-    1. `async hostRoom(preferredCode = null)`:
-       - Resolves `PeerCtor = await ensurePeerClass(options.PeerClass)`.
-       - Attempts up to 3 codes (`preferredCode` first if valid, else `generateRoomCode()`).
-       - Creates `new PeerCtor(peerIdForRoom(code), NET_CONFIG.peerOptions)`.
-       - If `peer.on('error', err)` fires `err.type === 'unavailable-id'` before `open`, destroys peer and retries next generated code (unless `preferredCode` was explicitly requested, in which case rejects).
-       - Resolves `{ roomCode: code }` on `peer.on('open')`.
-       - On `peer.on('connection', conn)`:
-         - If `activeConn` is already open or handshake-pending, waits for `conn.on('open')` to send `{ v: 1, type: 'room_full' }` and closes `conn` without disturbing `activeConn`.
-         - Otherwise binds `activeConn = conn`: handles `{ v: 1, type: 'ping' }` -> replies `{ v: 1, type: 'pong' }`; on first `{ v: 1, type: 'hello' }`, starts `pingIntervalMs` heartbeat and invokes `handlers.onGuestJoined?.({ roomCode: code })`; forwards gameplay messages to `handlers.onMessage?.(msg)`; on `{ v: 1, type: 'peer_left' }` or `conn` `close`/`error` (when not locally closed), cleans up and fires `handlers.onPeerLeft?.()`.
-    2. `async joinRoom(rawCode)`:
-       - Validates `const code = normalizeRoomCode(rawCode)`; rejects if `!isValidRoomCode(code)` with `'Please enter a 6-character room code.'`.
-       - Resolves `PeerCtor = await ensurePeerClass(options.PeerClass)`.
-       - Opens anonymous `new PeerCtor(undefined, NET_CONFIG.peerOptions)` within `connectTimeoutMs`.
-       - Calls `peer.connect(peerIdForRoom(code), { reliable: true, serialization: 'json' })`.
-       - Maps `err.type === 'peer-unavailable'` to `'Room not found. Check the 6-character code and ensure the host has the room open.'`.
-       - If `{ type: 'room_full' }` arrives before/after open, closes and rejects with `'That room already has two players.'`.
-       - On `conn.on('open')`, starts heartbeat, sends `{ v: 1, type: 'hello' }`, fires `handlers.onJoinedHost?.({ roomCode: code })`, and resolves `{ roomCode: code }`.
-    3. `send(payload)`: if `activeConn?.open`, calls `activeConn.send({ v: 1, ...payload })` and returns `true`; else `false`.
-    4. `isConnected()`: `Boolean(activeConn && activeConn.open)`.
-    5. `getRole()`: `'host' | 'guest' | null`.
-    6. `getRoomCode()`: `roomCode`.
-    7. `close(notifyPeer = false)`: sets `closedByUs = true` first (preventing re-entrant `onPeerLeft`), optionally sends `{ v: 1, type: 'peer_left' }`, clears timers, closes `activeConn`, and calls `peer.destroy()`.
+function finishGame() {
+  computeEndgame();
+  state.gameOver = true;
+  if (state.winner === 0) {
+    state.message = `No winner in Round ${state.round} — advancing to next round!`;
+  } else {
+    state.message = `Game over! Player ${state.winner} wins.`;
+  }
+}
+```
+*(Note: Because total Charm Points across all 7 characters is $2+2+2+3+3+4+5 = 21 < 22$ and total characters is $7 < 8$, `p1Points && p2Points` and `p1Geishas && p2Geishas` are mathematically impossible.)*
 
 ---
 
-### 3. Sanitized State Projection in `docs/src/game.js`
+### 2. Background-Tab Safe Animations (`docs/src/fx.js`)
 
-Append two pure functions to `docs/src/game.js` (leaving all existing functions and default arguments unchanged):
+Browsers pause Web Animations API `.finished` promises indefinitely in hidden tabs (`document.visibilityState === 'hidden'`), which stalls `playOnlineLocalTurn` / `handleActionIntent`. Replace `docs/src/fx.js` with:
 
 ```js
-/**
- * Builds a JSON-serializable state snapshot for `viewerSeat` (1 or 2) with
- * hidden information masked: deck contents and opponent hand cards are replaced
- * by counts, and the opponent's secret card is masked as `0` until `gameOver`.
- * @param {1 | 2} viewerSeat
- */
-export function buildPlayerView(viewerSeat) {
-  const seat = viewerSeat === 2 ? 2 : 1;
-  const opp = other(seat);
-  const oppSecretRaw = state.secretCard[opp];
-  const oppSecretMasked = state.gameOver
-    ? oppSecretRaw
-    : (oppSecretRaw !== null ? 0 : null);
+export const motion = {
+  factor: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0.01 : 1
+};
 
-  return {
-    viewerSeat: seat,
-    round: state.round,
-    roundStarter: state.roundStarter,
-    currentPlayer: state.currentPlayer,
-    turnsTaken: state.turnsTaken,
-    deckCount: state.deck.length,
-    myHand: [...state.players[seat].hand],
-    oppHandCount: state.players[opp].hand.length,
-    actions: {
-      1: { ...state.players[1].actions },
-      2: { ...state.players[2].actions }
-    },
-    geishagifts: [
-      null,
-      [...state.geishagifts[1]],
-      [...state.geishagifts[2]]
-    ],
-    secretCard: seat === 1
-      ? [null, state.secretCard[1], oppSecretMasked]
-      : [null, oppSecretMasked, state.secretCard[2]],
-    geishalove: [...state.geishalove],
-    priorGeishaLove: [...state.priorGeishaLove],
-    scores: [...state.scores],
-    geishaCount: [...state.geishaCount],
-    gameOver: state.gameOver,
-    winner: state.winner,
-    message: state.message
-  };
+function isHiddenDoc() {
+  return typeof document !== 'undefined' && document.visibilityState === 'hidden';
 }
 
-/**
- * Applies a `buildPlayerView` snapshot onto local `state` for client rendering.
- * @param {ReturnType<typeof buildPlayerView>} view
- */
-export function applyPlayerView(view) {
-  const seat = view.viewerSeat === 2 ? 2 : 1;
-  const opp = other(seat);
-  state.round = view.round;
-  state.roundStarter = view.roundStarter;
-  state.currentPlayer = view.currentPlayer;
-  state.turnsTaken = view.turnsTaken;
-  state.deck = Array(view.deckCount).fill(0);
-  state.players[seat].hand = [...view.myHand];
-  state.players[opp].hand = Array(view.oppHandCount).fill(0);
-  state.players[1].actions = { ...view.actions[1] };
-  state.players[2].actions = { ...view.actions[2] };
-  state.geishagifts = [
-    null,
-    [...view.geishagifts[1]],
-    [...view.geishagifts[2]]
-  ];
-  state.secretCard = [null, view.secretCard[1], view.secretCard[2]];
-  state.geishalove = [...view.geishalove];
-  state.priorGeishaLove = [...view.priorGeishaLove];
-  state.scores = [...view.scores];
-  state.geishaCount = [...view.geishaCount];
-  state.gameOver = Boolean(view.gameOver);
-  state.winner = view.winner;
-  state.message = view.message || '';
+export function wait(ms) {
+  if (isHiddenDoc()) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms * motion.factor));
+}
+
+export function rectOf(el) {
+  if (!el) return new DOMRect(0, 0, 80, 160);
+  return el.getBoundingClientRect();
+}
+
+export function flyCard({ from, to, frontSrc = null, backSrc, startFaceUp, endFaceUp,
+                          duration = 550, delay = 0, keep = false }) {
+  const layer = document.getElementById('fx-layer');
+  const card = document.createElement('div');
+  card.className = 'fx-card';
+  const fw = from.width || 80;
+  const fh = from.height || 160;
+  const tw = to.width || fw;
+  const th = to.height || fh;
+  Object.assign(card.style, {
+    left: `${from.left}px`, top: `${from.top}px`,
+    width: `${fw}px`, height: `${fh}px`
+  });
+  const inner = document.createElement('div');
+  inner.className = 'fx-inner';
+  const front = document.createElement('div');
+  front.className = 'fx-face fx-front';
+  if (frontSrc) front.style.backgroundImage = `url('${frontSrc}')`;
+  const back = document.createElement('div');
+  back.className = 'fx-face fx-back';
+  back.style.backgroundImage = `url('${backSrc}')`;
+  inner.append(front, back);
+  card.append(inner);
+  layer.append(card);
+
+  const r0 = startFaceUp ? 0 : 180;
+  const r1 = endFaceUp ? 0 : 180;
+
+  if (isHiddenDoc()) {
+    if (keep) {
+      Object.assign(card.style, {
+        left: `${to.left}px`, top: `${to.top}px`,
+        width: `${tw}px`, height: `${th}px`
+      });
+      inner.style.transform = `rotateY(${r1}deg)`;
+    } else {
+      card.remove();
+    }
+    return Promise.resolve(card);
+  }
+
+  const dx = to.left - from.left;
+  const dy = to.top - from.top;
+  const sx = tw / fw;
+  const sy = th / fh;
+  const dur = Math.max(1, duration * motion.factor);
+  const del = delay * motion.factor;
+  const opts = {
+    duration: dur,
+    delay: del,
+    easing: 'cubic-bezier(.2,.7,.2,1)',
+    fill: 'forwards'
+  };
+  const move = card.animate([
+    { transform: 'translate(0px, 0px) scale(1, 1)' },
+    { transform: `translate(${dx / 2}px, ${dy / 2 - 30}px) scale(${((1 + sx) / 2) * 1.08}, ${((1 + sy) / 2) * 1.08})`, offset: 0.5 },
+    { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` }
+  ], opts);
+  const flip = inner.animate([
+    { transform: `rotateY(${r0}deg)` },
+    { transform: `rotateY(${r1}deg)` }
+  ], opts);
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(safetyTimer);
+      if (!keep) card.remove();
+      resolve(card);
+    };
+    const safetyTimer = setTimeout(() => {
+      try { move.finish(); } catch (_) {}
+      try { flip.finish(); } catch (_) {}
+      finish();
+    }, dur + del + 350);
+    Promise.all([move.finished, flip.finished]).then(finish, finish);
+  });
+}
+
+export function clearFx() {
+  document.getElementById('fx-layer')?.replaceChildren();
 }
 ```
 
 ---
 
-### 4. HTML Markup Updates (`docs/index.html`)
+### 3. Network Heartbeat, Signaling Recovery & Reconnection (`docs/src/net-config.js` & `docs/src/net.js`)
 
-1. **Top bar badge (line 20):** Change initial text from `Tactical AI` to `Medium AI`:
-   ```html
-   <span id="difficulty-badge" class="badge">Medium AI</span>
-   ```
-2. **Mode Selection Card (`#mode-selection-screen`, lines 73–114):**
-   Replace the setup controls inside `.mode-selection-card` with:
-   ```html
-          <h1>Seven Favors</h1>
-          <p class="subtitle">A tactical duel of secret gifts, shrewd trades, and contested favor.</p>
+#### 3.1 `docs/src/net-config.js`
+- Set `pingIntervalMs: 5000` and add `pongTimeoutMs: 16000`.
 
-          <p class="mode-desc">Game mode:</p>
+#### 3.2 `docs/src/net.js`
+Update `createNetSession(handlers = {}, options = {})`:
+- **Options:**
+  - `connectTimeoutMs = options.connectTimeoutMs ?? NET_CONFIG.connectTimeoutMs`
+  - `pingIntervalMs = options.pingIntervalMs ?? NET_CONFIG.pingIntervalMs`
+  - `pongTimeoutMs = options.pongTimeoutMs ?? NET_CONFIG.pongTimeoutMs`
+  - `clientId = options.clientId || generateClientId()` (12-char alphanumeric ID)
+- **Internal Session State:**
+  - `let peer = null;`, `let activeConn = null;`, `let role = null;`, `let roomCode = null;`
+  - `let closedByUs = false;`, `let peerLeftIntentionally = false;`
+  - `let hasHadGuest = false;`, `let guestClientId = null;`
+  - `let pingTimer = null;`, `let reconnectSignalingTimer = null;`, `let lastRxAt = 0;`
+- **Heartbeat & Timeout (`startHeartbeat()`):**
+  - Sets `lastRxAt = Date.now()`.
+  - `pingTimer = setInterval(...)` every `pingIntervalMs` (calling `pingTimer.unref?.()`):
+    - If `activeConn && activeConn.open`:
+      - If `Date.now() - lastRxAt > pongTimeoutMs`:
+        - Closes `activeConn` and invokes `handleUnexpectedDisconnect('heartbeat_timeout')`.
+        - Returns.
+      - Sends `{ v: 1, type: 'ping' }`.
+- **Signaling Auto-Reconnect (`attachSignalingRecovery(p)`):**
+  - On `p.on('disconnected', ...)`: if `!closedByUs && peer === p && !p.destroyed`, clears any prior `reconnectSignalingTimer` and schedules `reconnectSignalingTimer = setTimeout(() => { if (!closedByUs && peer === p && p.disconnected && !p.destroyed) { try { p.reconnect(); } catch (_) {} } }, 1000)` (`reconnectSignalingTimer.unref?.()`).
+- **Disconnect Routing:**
+  - `handleIntentionalPeerLeft()`: sets `peerLeftIntentionally = true`, stops heartbeat, closes `activeConn` (`activeConn = null`), and calls `handlers.onPeerLeft?.()`.
+  - `handleUnexpectedDisconnect(reason)`: if `closedByUs || peerLeftIntentionally` return; stops heartbeat; if `activeConn` exists, closes it and sets `activeConn = null`; if `handlers.onConnectionLost` is provided, calls `handlers.onConnectionLost({ roomCode, role, reason })`, **otherwise** falls back to `handlers.onPeerLeft?.()` (preserving backward compatibility with callers that only register `onPeerLeft`).
+  - Note on `p.on('close')`:
+    - Only triggers `handleUnexpectedDisconnect('peer_closed')` if `peer === p && !closedByUs && (!activeConn || !activeConn.open)`.
+- **Host `peer.on('connection', conn)` Reconnection & `room_full` Guard:**
+  - Listen for `conn.on('data', data)` (with an 8s un-greeted cleanup timer `handshakeTimer`, `.unref?.()`):
+    - On first `data?.type === 'hello'`:
+      - Clear `handshakeTimer`.
+      - Let `incomingClientId = typeof data.clientId === 'string' ? data.clientId : null`.
+      - Let `isSameGuestReconnecting = Boolean(hasHadGuest && guestClientId && incomingClientId === guestClientId)`.
+      - **Occupied Room Check:** If `activeConn && activeConn.open && !isSameGuestReconnecting`:
+        - Send `{ v: 1, type: 'room_full' }` and close `conn` after 100ms without disturbing `activeConn`. Return.
+      - **Replace Stale Connection (if `activeConn` was half-open for same guest):**
+        - If `activeConn && activeConn !== conn`:
+          - Detach by setting `const stale = activeConn; activeConn = null; try { stale.close(); } catch (_) {}`.
+      - Bind `const isResume = hasHadGuest;`:
+        - `hasHadGuest = true;`
+        - `guestClientId = incomingClientId;`
+        - `peerLeftIntentionally = false;`
+        - `activeConn = conn;`
+        - `greeted = true;`
+        - `startHeartbeat();`
+        - Send `{ v: 1, type: 'welcome', resumed: isResume }`.
+        - If `isResume && handlers.onGuestReconnected`: call `handlers.onGuestReconnected({ roomCode })`; else call `handlers.onGuestJoined?.({ roomCode })`.
+    - For subsequent packets when `greeted && activeConn === conn`: update `lastRxAt = Date.now()` and call `handleConnData(data)`.
+- **Guest `connectGuestToHost(p, code)` helper (shared by `joinRoom` and `reconnect`):**
+  - Connects `p.connect(peerIdForRoom(code), { reliable: true, serialization: 'json' })`.
+  - Sends `{ v: 1, type: 'hello', clientId }`.
+  - On `data?.type === 'welcome'`: starts heartbeat (`lastRxAt = Date.now()`), sets `peerLeftIntentionally = false`, calls `handlers.onJoinedHost?.({ roomCode: code, resumed: Boolean(data.resumed) })`, and resolves `{ roomCode: code, resumed: Boolean(data.resumed) }`.
+  - On `data?.type === 'room_full'`: rejects with `new Error('That room already has two players.')` (without destroying `peer` if called from `reconnect()`, or cleaning up if called from `joinRoom`).
+- **`async reconnect()` Method Returned by `createNetSession`:**
+  - If `closedByUs || !role || !roomCode`: throw `new Error('No active online session to reconnect.')`.
+  - `peerLeftIntentionally = false;`
+  - **If `role === 'host'`:**
+    - If `peer && !peer.destroyed`:
+      - If `peer.disconnected`: call `peer.reconnect()` and await `'open'` (with `connectTimeoutMs` fallback to re-creating peer via `hostRoom(roomCode, { keepGuestState: true })`).
+      - Return `{ roomCode, connected: isConnected() }`.
+    - Else: call `await hostRoom(roomCode, { keepGuestState: true })` (which preserves `hasHadGuest` and `guestClientId` so when Guest reconnects, `onGuestReconnected` fires!).
+    - Return `{ roomCode, connected: isConnected() }`.
+  - **If `role === 'guest'`:**
+    - Stop heartbeat; if `activeConn`, close it and set `activeConn = null`.
+    - Ensure `peer` is open on signaling server: if `!peer || peer.destroyed` or `peer.disconnected` (attempting `peer.reconnect()`, falling back to creating `new PeerCtor(undefined, NET_CONFIG.peerOptions)` and awaiting `'open'`).
+    - Return `await connectGuestToHost(peer, roomCode)` within `connectTimeoutMs`.
+- Export `getClientId: () => clientId` and `reconnect` alongside existing session methods (`hostRoom`, `joinRoom`, `send`, `isConnected`, `getRole`, `getRoomCode`, `close`).
+
+---
+
+### 4. HTML Markup & SVG Icons (`docs/index.html`)
+
+1. **Mode Selection Buttons (`#game-mode-buttons`, lines 79–88):**
+   Rename `Online 2P` to `Online Two Player` and add `<svg class="mode-btn-icon" aria-hidden="true">` icons to both buttons:
+   ```html
           <div id="game-mode-buttons" class="setup-buttons two-col" role="group" aria-label="Game mode">
-            <button id="mode-ai-button" class="setup-button selected" type="button" data-mode="ai" aria-pressed="true">
+            <button id="mode-ai-button" class="setup-button mode-choice-btn selected" type="button" data-mode="ai" aria-pressed="true">
+              <svg class="mode-btn-icon" aria-hidden="true"><use href="#icon-single-player"/></svg>
               <strong>Single Player</strong>
               <span>Play vs Computer</span>
             </button>
-            <button id="mode-online-button" class="setup-button" type="button" data-mode="online" aria-pressed="false">
-              <strong>Online 2P</strong>
+            <button id="mode-online-button" class="setup-button mode-choice-btn" type="button" data-mode="online" aria-pressed="false">
+              <svg class="mode-btn-icon" aria-hidden="true"><use href="#icon-two-player"/></svg>
+              <strong>Online Two Player</strong>
               <span>Play over the internet</span>
             </button>
           </div>
-
-          <div id="ai-setup-section">
-            <p class="mode-desc">AI difficulty:</p>
-            <div id="difficulty-buttons" class="setup-buttons" role="group" aria-label="AI difficulty">
-              <button id="ai-easy-button" class="setup-button" type="button" data-diff="easy" aria-pressed="false">
-                <strong>Easy</strong>
-                <span>Relaxed play</span>
-              </button>
-              <button id="ai-medium-button" class="setup-button selected" type="button" data-diff="medium" aria-pressed="true">
-                <strong>Medium</strong>
-                <span>Balanced tactics</span>
-              </button>
-              <button id="ai-hard-button" class="setup-button" type="button" data-diff="hard" aria-pressed="false">
-                <strong>Hard</strong>
-                <span>Optimal minimax</span>
-              </button>
-            </div>
-          </div>
-
-          <div id="starter-setup-section">
-            <p class="mode-desc">Starting player:</p>
-            <div id="starter-buttons" class="setup-buttons" role="group" aria-label="Starting player">
-              <button id="starter-human-button" class="setup-button" type="button" data-starter="1" aria-pressed="false">
-                <strong id="starter-p1-title">You</strong>
-                <span id="starter-p1-sub">You go first</span>
-              </button>
-              <button id="starter-ai-button" class="setup-button" type="button" data-starter="2" aria-pressed="false">
-                <strong id="starter-p2-title">Computer</strong>
-                <span id="starter-p2-sub">AI goes first</span>
-              </button>
-              <button id="starter-random-button" class="setup-button selected" type="button" data-starter="random" aria-pressed="true">
-                <strong>Random</strong>
-                <span>Coin toss</span>
-              </button>
-            </div>
-          </div>
-
-          <button id="start-game-button" class="primary start-game-btn" type="button">Start Game</button>
-
-          <div id="online-setup-section" class="online-setup hidden">
-            <div id="online-role-tabs" class="online-role-tabs" role="group" aria-label="Online role">
-              <button id="online-tab-host" class="role-tab-btn selected" type="button" data-online-tab="host" aria-pressed="true">Host Game</button>
-              <button id="online-tab-join" class="role-tab-btn" type="button" data-online-tab="join" aria-pressed="false">Join Game</button>
-            </div>
-
-            <div id="online-host-panel">
-              <button id="create-room-button" class="primary start-game-btn" type="button">Create Room</button>
-              <div id="host-lobby-box" class="lobby-box hidden">
-                <div class="lobby-label">Share Room Code</div>
-                <div id="lobby-room-code" class="room-code-value">------</div>
-                <div class="lobby-copy-row">
-                  <button id="copy-code-button" class="secondary lobby-copy-btn" type="button">Copy Code</button>
-                  <button id="copy-link-button" class="secondary lobby-copy-btn" type="button">Copy Invite Link</button>
-                </div>
-                <p id="host-lobby-status" class="online-status">Waiting for opponent to join…</p>
-                <button id="cancel-room-button" class="secondary lobby-cancel-btn" type="button">Cancel Room</button>
-              </div>
-            </div>
-
-            <div id="online-join-panel" class="hidden">
-              <label class="mode-desc join-label" for="join-code-input">Enter 6-character room code:</label>
-              <input id="join-code-input" class="room-code-input" type="text" maxlength="6" placeholder="K7M4P9" autocomplete="off" autocapitalize="characters" spellcheck="false" />
-              <p id="join-status-msg" class="online-status hidden"></p>
-              <button id="join-room-button" class="primary start-game-btn" type="button">Join Room</button>
-              <button id="cancel-join-button" class="secondary lobby-cancel-btn hidden" type="button">Cancel</button>
-            </div>
-          </div>
-
-          <p class="disclaimer">Inspired by the core tabletop game mechanics designed by Kota Nakayama. <em>Hanamikoji</em> is a registered trademark of EmperorS4 and Taiwan Boardgame Design. All code and visual assets in this project are independent and created for non-commercial educational purposes.</p>
    ```
-3. **Disconnect Modal (`#disconnect-modal`):** Place inside `#stage` immediately after `#confirm-modal`:
+2. **Disconnect / Reconnect Modal (`#disconnect-modal`, lines 172–180):**
+   Add `#disconnect-reconnect-button` alongside `#disconnect-ok-button`:
    ```html
       <div id="disconnect-modal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="disconnect-modal-title">
         <div class="confirm-modal-card">
-          <h2 id="disconnect-modal-title">Opponent Disconnected</h2>
-          <p id="disconnect-modal-desc" class="confirm-modal-desc">Your opponent left the match or lost connection.</p>
+          <h2 id="disconnect-modal-title">Connection Lost</h2>
+          <p id="disconnect-modal-desc" class="confirm-modal-desc">Connection to opponent was interrupted.</p>
           <div class="confirm-modal-actions">
-            <button id="disconnect-ok-button" class="modal-btn primary" type="button">Back to Menu</button>
+            <button id="disconnect-reconnect-button" class="modal-btn primary" type="button">Reconnect</button>
+            <button id="disconnect-ok-button" class="modal-btn secondary" type="button">Back to Menu</button>
           </div>
         </div>
       </div>
+   ```
+3. **SVG `<defs>` Symbols (inside `<svg><defs>`, before `</defs>`):**
+   Add clear 1-player and 2-player symbols:
+   ```html
+      <symbol id="icon-single-player" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="8" r="4"/><path d="M5 20a7 7 0 0 1 14 0"/></symbol>
+      <symbol id="icon-two-player" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="16.5" cy="9" r="3"/><path d="M16.5 14.5a5.5 5.5 0 0 1 5 5.5"/></symbol>
    ```
 
 ---
 
 ### 5. Styling Updates (`docs/src/styles.css`)
 
-1. **Perspective-Safe Stack Count Badges (lines 193–199):**
-   Replace `.gift-stack[data-stack^="1-"] .stack-count` and `.gift-stack[data-stack^="2-"] .stack-count` with:
+1. **Mode Button Icons (`.mode-btn-icon`):**
    ```css
-   .gift-stack.stack-bottom .stack-count {
-     top: 2px;
+   .mode-btn-icon {
+     width: 28px;
+     height: 28px;
+     margin-bottom: 4px;
+     color: var(--text-muted);
+     transition: color 0.15s, transform 0.15s;
    }
 
-   .gift-stack.stack-top .stack-count {
-     bottom: 2px;
+   .setup-button:hover .mode-btn-icon {
+     color: var(--text);
+   }
+
+   .setup-button.selected .mode-btn-icon {
+     color: var(--accent);
    }
    ```
-2. **Compact Setup Card & Online Lobby Styles (around lines 1035–1141):**
-   - Adjust `.mode-selection-card` padding to `24px 32px` (`max-width: 600px`) and margins (`.subtitle` `margin-bottom: 14px`, `.setup-buttons` `margin-bottom: 14px`, `.disclaimer` `margin-top: 16px`) so all setup views fit comfortably inside `900px` stage height with generous vertical clearance.
-   - Add `.setup-buttons.two-col { grid-template-columns: repeat(2, 1fr); }`.
-   - Style `.online-role-tabs` (2-column pill switcher), `.role-tab-btn` / `.role-tab-btn.selected`, `.lobby-box` (rounded dark panel with dashed accent border), `.room-code-value` (`font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 2rem; font-weight: 800; letter-spacing: 0.22em; color: var(--accent); user-select: text; -webkit-user-select: text;`), `.lobby-copy-row` + `.lobby-copy-btn`, `.room-code-input` (`width: 100%; text-align: center; text-transform: uppercase; letter-spacing: 0.2em; font-size: 1.35rem; font-weight: 800; padding: 10px 14px; border-radius: 12px; background: rgba(8, 16, 30, 0.8); color: var(--text); border: 1.5px solid rgba(255, 255, 255, 0.18); user-select: text; -webkit-user-select: text;`), `.lobby-cancel-btn`, and `.online-status` (with `.online-status.error { color: var(--danger); }`).
+2. **Non-Blocking Persistent `#peek-restore-button` (`.peek-restore-btn`):**
+   On the `1760×900` `#stage`:
+   - `.geisha-grid` occupies `x = 441..1295px, y = 206..646px`.
+   - `#offer-tray` (without the inline button) occupies `x ≈ 618..1257px, y ≈ 313..539px`.
+   - `.result-card` occupies `x ≈ 519..1241px`.
+   - `.pile-column` cards occupy `x = 1640..1715px`.
+   - Therefore **`left: 1468px; top: 426px; translate: -50% -50%;`** sits right in the `345px`-wide open felt corridor between the 7th Character column and the Deck/Discard piles, vertically aligned with `#offer-tray`, blocking **nothing** on the board and never moving a pixel when clicked!
+   Update `.peek-restore-btn` in `docs/src/styles.css` (replacing lines 828–860):
+   ```css
+   .peek-restore-btn {
+     position: absolute;
+     top: 426px;
+     left: 1468px;
+     translate: -50% -50%;
+     z-index: 115;
+     min-width: 172px;
+     display: inline-flex;
+     align-items: center;
+     justify-content: center;
+     gap: 8px;
+     padding: 11px 20px;
+     border-radius: 9999px;
+     border: 1.5px solid rgba(244, 211, 94, 0.55);
+     font-size: 0.92rem;
+     font-weight: 800;
+     cursor: pointer;
+     touch-action: manipulation;
+     user-select: none;
+     -webkit-user-select: none;
+     box-shadow: 0 0 0 3px rgba(244, 211, 94, 0.22), 0 12px 28px rgba(0, 0, 0, 0.6);
+     transform: translateY(0);
+     transition: transform 0.15s, filter 0.15s, background 0.15s, color 0.15s;
+   }
+
+   .peek-restore-btn.peek-closed {
+     background: rgba(15, 23, 42, 0.94);
+     color: var(--text);
+   }
+
+   .peek-restore-btn.peek-closed .icon {
+     color: var(--accent);
+   }
+
+   .peek-restore-btn .icon {
+     width: 18px;
+     height: 18px;
+     flex-shrink: 0;
+   }
+
+   .peek-restore-btn:hover {
+     transform: translateY(-1px);
+     filter: brightness(1.08);
+   }
+   ```
+   *(Remove `.peek-restore-btn.holding { pointer-events: none; }` so pointer events and cursor stay steady in-place during rapid clicks.)*
 
 ---
 
-### 6. UI Perspective & Online Multiplayer Orchestration (`docs/src/ui.js`)
+### 6. UI, Persistent Peek Toggle, Lobby Reset & Online Synchronization (`docs/src/ui.js`)
 
-#### 6.1 Constants & Seat Helpers
-- Change `DIFF_LABELS`:
-  ```js
-  const DIFF_LABELS = { easy: 'Easy', medium: 'Medium', hard: 'Hard' };
-  ```
-- Change default starting player preference:
-  ```js
-  let startingPlayerPref = 'random'; // 1 | 2 | 'random'
-  ```
-- Add online/perspective state:
-  ```js
-  let setupMode = 'ai';       // 'ai' | 'online'
-  let onlineTab = 'host';     // 'host' | 'join'
-  let onlineBusy = false;     // true while creating/joining a room
-  let gameMode = 'ai';        // 'ai' | 'online'
-  let localSeat = 1;          // 1 (AI mode or Online Host) | 2 (Online Guest)
-  let netSession = null;
-  let onlineRoomCode = null;
-  let localReadyNext = false;
-  let remoteReadyNext = false;
-  let pendingSignals = new Map(); // type -> resolve[]
-  let turnQueue = Promise.resolve();
-  ```
-- Define perspective helpers used everywhere in `ui.js` (replacing hardcoded `HUMAN` / `AI_PLAYER` for DOM zones, stacks, colors, history, secret slots, and result panels, while `AI_PLAYER = 2` remains used exclusively for `AI.*` calls in `gameMode === 'ai'`):
-  ```js
-  const oppSeat = () => Game.other(localSeat);
-  const oppName = () => (gameMode === 'online' ? 'Opponent' : 'Computer');
-  const oppFavorTag = () => (gameMode === 'online' ? '▲ Opp' : '▲ AI');
-  ```
-  - `handEl(player, index)`: `(player === localSeat ? els.handList : els.opponentHandList).querySelector(...)`
-  - `stackTargetRects`: `const top = player === localSeat ? r.top + off : r.bottom - h - off;`
-  - `buildGiftStack(player, cardId)`: adds `stack-bottom` when `player === localSeat` else `stack-top`; sets `c.style.top` when `player === localSeat` else `c.style.bottom`.
-  - `buildBoard()`: `topStack = buildGiftStack(oppSeat(), row.id)`, `bottomStack = buildGiftStack(localSeat, row.id)`; favor marker uses `displayedOwner === localSeat ? 'favor-p1' : 'favor-p2'` and `displayedOwner === localSeat ? '▼ You' : oppFavorTag()`.
-  - `updateTopBar()`:
-    - `#opponent-secret` `data-tip`: `gameMode === 'online' ? "Opponent's secret" : "Computer's secret"`.
-    - `#opponent-actions` `aria-label`: `${oppName()} actions remaining`.
-    - `#difficulty-badge`: `gameMode === 'online' ? `Online · ${onlineRoomCode || ''}` : `${DIFF_LABELS[aiDifficulty]} AI``.
-    - `#turn-badge`: in `gameMode === 'online'` (when `!Game.state.gameOver`), `Turn ${t} / 8 · ${Game.state.currentPlayer === localSeat ? 'Your Turn' : "Opponent's Turn"}`; in `ai` mode, `Turn ${t} / 8`.
-    - Active glow: `els.playerZone` active when `currentPlayer === localSeat`, `els.opponentZone` active when `currentPlayer === oppSeat()`.
-  - `renderOfferTray()`:
-    - `--offer-color`: `pendingOffer.offerer === localSeat ? 'var(--player-color)' : 'var(--ai-color)'`.
-    - Chosen outline class: `chosen-${receiver === localSeat ? 1 : 2}` (so blue always means local player, red always means opponent).
-    - When `gameMode === 'online' && !pendingOffer.interactive && pendingOffer.revealed && pendingOffer.chosen === null`, `.tray-head` renders `<span>Opponent choosing…</span>` plus the `.tray-peek-btn` **View Board** button (`canPeekBoard()` returns `true` for this waiting state as well).
-  - `buildHistoryItem(e, isNew)`:
-    - `const isMe = e.player === localSeat;`
-    - `who = isMe ? 'You' : oppName()`; `li` uses `isMe ? 'by-player' : 'by-ai'`.
-    - Mini card outline class maps `c.to === localSeat ? 'to-1' : c.to === oppSeat() ? 'to-2' : 'to-' + c.to`.
-  - `animateDraw(player, prevHand, token)`:
-    - `frontSrc: player === localSeat ? cardFront(now[index]) : null`
-    - `endFaceUp: player === localSeat`
-  - `animateReveal(token)`:
-    - Iterates `[localSeat, oppSeat()]`, checks `if (!card) return null;`, and reveals `oppSecret` in `history` for `h.player === oppSeat()`.
-  - `buildResultPanel()`:
-    - Left column (`You`) displays `localSeat === 1 ? result.player1 : result.player2`; right column (`oppName()`) displays `localSeat === 1 ? result.player2 : result.player1`.
-    - Winner text: `result.winner === localSeat ? '🏆 You won!' : (gameMode === 'online' ? '⚔️ Opponent won!' : '🤖 Computer won!')`.
-    - Tie starter note: `nextStarter === localSeat ? 'You go' : `${oppName()} goes``.
-    - In `gameMode === 'online'`:
-      - If `isTie`: primary button is `Start Round ${result.round + 1}` (when clicked, sets `localReadyNext = true`, sends `{ type: 'ready_next', kind: 'next_round' }`, updates button label to `Waiting for opponent…`, and once both `localReadyNext && remoteReadyNext` on Host, Host calls `beginOnlineNextRound()`). Also includes `Leave Room` secondary button.
-      - If `!isTie`: primary button is `Rematch` (same mutual-ready handshake using `kind: 'rematch'`; once both ready, Host starts a fresh Game 1 with `startingPlayerPref` and broadcasts `round_start`), alongside `View Board` and `Leave Room` (`handleLeaveOnline()`).
+#### 6.1 Element References (`els`)
+Add to `const els = { ... }` in `docs/src/ui.js`:
+```js
+  disconnectModalTitle: document.getElementById('disconnect-modal-title'),
+  disconnectReconnectButton: document.getElementById('disconnect-reconnect-button'),
+```
 
-#### 6.2 Online Turn Protocol & Concurrency Queue
-- **Signal Helpers (`waitForNetSignal(type)` / `resolveNetSignal(type, msg)` / `rejectAllNetSignals()`):**
-  - `waitForNetSignal(type)` returns a `Promise` registered **before** calling `netSession.send(...)` so fast/0ms responses are never missed; `rejectAllNetSignals()` rejects all pending waiters on disconnect/reset.
-- **Turn Serialization (`enqueueNetTurn(fn)`):**
-  - Chains turn-initiating events (`round_start`, `remote_secret`, `remote_tradeoff`, `offer_made`, `action_intent`, `offer_intent`) onto `turnQueue = turnQueue.then(fn, fn)` so a fast (`prefers-reduced-motion`) peer can never overlap animations on a normal-motion peer.
-  - Resolution signals (`turn_commit`, `offer_response`, `offer_choice`) bypass `turnQueue` and immediately resolve the active `waitForNetSignal` promise.
-- **Local Turn Execution (`confirmSelection()`):**
-  - Branches cleanly: `if (gameMode === 'online') await playOnlineLocalTurn(type, [...selected]); else await playHumanTurn(type, [...selected]);`.
-  - **Host (`localSeat === 1`):**
-    - `secret`: sends `{ type: 'remote_secret', selected: [idx] }`, flies card to `#player-secret`, calls `Game.performSecret(1, idx)`, sends `{ type: 'turn_commit', view: Game.buildPlayerView(2) }`, pushes history, runs `afterCommit`.
-    - `tradeoff`: sends `{ type: 'remote_tradeoff', selected: sel }`, flies cards to `#discard-pile`, calls `Game.performTradeoff(1, sel)`, sends `{ type: 'turn_commit', view: Game.buildPlayerView(2) }`, pushes history, runs `afterCommit`.
-    - `gift` / `competition`: arms `waitForNetSignal('offer_response')`, sends `{ type: 'offer_made', kind: type, selected: sel, cards }`, flies cards to `#offer-tray`, awaits `{ choice }`, validates `choice`, highlights & runs `distributeOffer`, calls `Game.performGift(1, sel, choice)` / `Game.performCompetition(1, sel, choice + 1)`, sends `{ type: 'turn_commit', view: Game.buildPlayerView(2) }`, pushes history, runs `afterCommit`.
-  - **Guest (`localSeat === 2`):**
-    - `secret` / `tradeoff`: arms `waitForNetSignal('turn_commit')`, sends `{ type: 'action_intent', action: type, selected: sel }`, flies local card(s), awaits `{ view }`, captures `prevNext = Game.getHand(1)`, calls `Game.applyPlayerView(view)`, pushes history, runs `afterCommit`.
-    - `gift` / `competition`: arms `waitForNetSignal('offer_choice')` and `waitForNetSignal('turn_commit')`, sends `{ type: 'offer_intent', kind: type, selected: sel }`, flies local cards to `#offer-tray`, awaits `{ choice }`, highlights & runs `distributeOffer`, awaits `{ view }`, captures `prevNext = Game.getHand(1)`, calls `Game.applyPlayerView(view)`, pushes history, runs `afterCommit`.
-- **URL Invite Auto-Join (`startApp()`):**
-  - Checks `new URLSearchParams(window.location.search).get('room')`. If valid, sets `setupMode = 'online'`, `onlineTab = 'join'`, populates `#join-code-input`, calls `updateSetupSelectionUI()`, and strips `?room=` via `window.history.replaceState({}, '', window.location.pathname)`.
+#### 6.2 Persistent In-Place `View Board` / `Show Offer` Toggle
+1. Replace `let suppressTriggerClickUntil = 0;` with `let suppressNextPeekClick = false;`.
+2. In `renderOfferTray()` (lines 620–640):
+   - Keep the status label (`Pick a card`, `Pick a pair`, or `Opponent choosing…`) inside `.tray-head`, and **remove** the inline `peekBtn` creation inside `.tray-head` so `#offer-tray` never embeds a disappearing button over the board.
+3. Update `activePeekTrigger()`:
+   ```js
+   function activePeekTrigger() {
+     if (!els.peekRestoreButton.classList.contains('hidden')) {
+       return els.peekRestoreButton;
+     }
+     if (Game.state.gameOver && resultReady) {
+       return els.resultPanel.querySelector('.peek-trigger-btn');
+     }
+     return null;
+   }
+   ```
+4. Update `updatePeekUI()` so `#peek-restore-button` is visible **whenever `canPeekBoard()` is true** (both `closed` and `holding`/`latched`), staying in the exact same spot (`1468px, 426px`):
+   ```js
+   function updatePeekUI() {
+     const available = canPeekBoard();
+     const active = peekState !== 'closed' && available;
+     els.stage.classList.toggle('is-peeking', active);
+
+     const latched = peekState === 'latched' && active;
+     els.offerTray.inert = latched;
+     els.resultPanel.inert = latched;
+
+     if (!available) {
+       els.peekRestoreButton.classList.add('hidden');
+       els.peekRestoreButton.classList.remove('holding', 'peek-closed');
+       return;
+     }
+
+     const targetName = Game.state.gameOver && resultReady ? 'Summary' : 'Offer';
+     if (!active) {
+       els.peekRestoreButton.innerHTML = `${iconSvg('eye')}<span>View Board</span>`;
+       els.peekRestoreButton.setAttribute('aria-label', 'View board');
+       els.peekRestoreButton.classList.add('peek-closed');
+       els.peekRestoreButton.classList.remove('holding');
+       els.peekRestoreButton.classList.remove('hidden');
+       return;
+     }
+
+     const label = peekState === 'holding' ? 'Release to Return' : `Show ${targetName}`;
+     els.peekRestoreButton.innerHTML = `${iconSvg('eye-off')}<span>${label}</span>`;
+     els.peekRestoreButton.setAttribute('aria-label', `Show ${targetName.toLowerCase()}`);
+     els.peekRestoreButton.classList.remove('peek-closed');
+     els.peekRestoreButton.classList.toggle('holding', peekState === 'holding');
+     els.peekRestoreButton.classList.remove('hidden');
+   }
+   ```
+5. Update pointer/click handlers on `#peek-restore-button` and `.peek-trigger-btn` (inside `.result-actions`) for instant repeated clicking + press-and-hold:
+   - In `handlePeekPointerEnd(e)`:
+     - Set `suppressNextPeekClick = true;` (replacing `suppressTriggerClickUntil`).
+     - If `heldMs >= PEEK_HOLD_MS`: `stopPeek(false);` else `latchPeek();`.
+   - On `els.stage` `pointerdown`:
+     - Match `const btn = e.target.closest('.peek-trigger-btn, #peek-restore-button');`
+     - `suppressNextPeekClick = false;`
+     - Only call `beginPeekHold(e.pointerId)` when `peekState === 'closed'`.
+   - On `els.stage` `click` (for `.peek-trigger-btn` inside `#result-panel`):
+     - If `suppressNextPeekClick` -> `suppressNextPeekClick = false; return;`, else `latchPeek()`.
+   - On `els.peekRestoreButton` `click`:
+     ```js
+     els.peekRestoreButton.addEventListener('click', () => {
+       if (suppressNextPeekClick) {
+         suppressNextPeekClick = false;
+         return;
+       }
+       if (!canPeekBoard() || isConfirmModalOpen() || isDisconnectModalOpen()) return;
+       if (peekState === 'closed') {
+         latchPeek();
+       } else {
+         stopPeek(true);
+       }
+     });
+     ```
+
+#### 6.3 Result Panel No-Winner Wording (`buildResultPanel()`)
+Update lines 715–720 of `docs/src/ui.js` so rounds ending with `winner === 0` (including e.g. `9 pts` vs `6 pts` where neither hit `11+` pts or `4+` Geishas) read accurately:
+```js
+  const headingText = isTie
+    ? `Round ${result.round} — No Winner Yet`
+    : (result.round > 1 ? `Game Over · Round ${result.round}` : 'Game Over');
+
+  let winnerText = '🤝 Neither player reached 4 Geishas or 11 Charm Points. Favors carry over!';
+```
+
+#### 6.4 Reset Abandoned Online Host/Join Lobby (`resetOnlineLobbyUI()`)
+Add `resetOnlineLobbyUI()` in `docs/src/ui.js` and call it inside `showModeSelection()` after closing `netSession`:
+```js
+function resetOnlineLobbyUI() {
+  onlineBusy = false;
+  onlineRoomCode = null;
+  els.lobbyRoomCode.textContent = '------';
+  els.hostLobbyBox.classList.add('hidden');
+  els.createRoomButton.classList.remove('hidden');
+  els.createRoomButton.disabled = false;
+  els.hostLobbyStatus.textContent = 'Waiting for opponent to join…';
+  els.hostLobbyStatus.classList.remove('error');
+
+  els.joinStatusMsg.textContent = '';
+  els.joinStatusMsg.classList.add('hidden');
+  els.joinStatusMsg.classList.remove('error');
+  els.joinRoomButton.disabled = false;
+  els.cancelJoinButton.classList.add('hidden');
+}
+```
+Also in `els.onlineRoleTabs` click listener: if switching away from `'host'` while `!gameStarted && netSession`, call `handleCancelRoomClick()` so an orphaned lobby room is closed cleanly.
+Because `setupMode` (`'online'`) and `onlineTab` (`'host'`) remain preserved when Host abandons an online game, `showModeSelection()` routes Host directly to **Online Two Player → Host Game** with `#host-lobby-box` hidden and the **`Create Room`** button enabled and visible!
+
+#### 6.5 Lock-Free Online Turn Protocol & Reconnection (`docs/src/ui.js`)
+
+1. **Persistent Tab `clientId`:**
+   ```js
+   function getOrCreateClientId() {
+     try {
+       let id = sessionStorage.getItem('seven-favors-client-id');
+       if (!id) {
+         id = Array.from({ length: 12 }, () => Net.ROOM_ALPHABET[Math.floor(Math.random() * Net.ROOM_ALPHABET.length)]).join('');
+         sessionStorage.setItem('seven-favors-client-id', id);
+       }
+       return id;
+     } catch (_) {
+       return undefined;
+     }
+   }
+   ```
+   Pass `{ clientId: getOrCreateClientId() }` as second argument `options` to `Net.createNetSession(handlers, options)` in both `handleCreateRoomClick` and `handleJoinRoomClick`.
+
+2. **Buffered & Rejectable Signal Promises (`pendingSignals` + `earlySignals`):**
+   Replace `waitForNetSignal`, `resolveNetSignal`, `rejectAllNetSignals`, and `awaitHumanChoice` so:
+   - `earlySignals = new Map()` buffers any signal (`turn_commit`, `offer_response`, `offer_choice`) that arrives *before* `waitForNetSignal(type)` is called; `waitForNetSignal(type)` immediately resolves from `earlySignals` if queued!
+   - `pendingSignals` stores `{ resolve, reject }`; `rejectAllNetSignals()` rejects every pending entry with `Object.assign(new Error('Net signal aborted'), { abort: true })`, clears `earlySignals`, and resets `turnQueue = Promise.resolve()`.
+   - `awaitHumanChoice()` attaches `pendingOffer.cancel = () => reject(Object.assign(new Error('Offer aborted'), { abort: true }))`; `resetUIState()` and `abortInFlightOnlineTurn()` invoke `pendingOffer?.cancel?.()` before setting `pendingOffer = null` so `turnQueue` can **never** deadlock!
+
+3. **Atomic Non-Interactive Turns (`remote_turn` & Immediate `turn_commit`):**
+   - **Host (`localSeat === 1`) playing `secret` or `tradeoff` in `playOnlineLocalTurn`:**
+     - Capture `prevNext = Game.getHand(2)` and DOM `from`/`to` rects, hide selected card(s) in DOM.
+     - Mutate `Game.performSecret(1, idx)` / `Game.performTradeoff(1, sel)` **immediately** and send ONE single atomic packet:
+       `netSession.send({ type: 'remote_turn', action: 'secret' | 'tradeoff', selected, view: Game.buildPlayerView(2) });`
+     - Run `await Fx.flyCard(...)`, `pushHistory(...)`, and `await afterCommit(prevNext, token)`.
+   - **Guest (`localSeat === 2`) handling `remote_turn` (`handleRemoteTurn(msg)` via `enqueueNetTurn`):**
+     - Animates `Fx.flyCard` for `msg.action` (`'secret'` or `'tradeoff'`), captures `prevNext = Game.getHand(2)`, applies `Game.applyPlayerView(msg.view)` directly from `msg.view` (**zero `waitForNetSignal` call!**), pushes history, and runs `await afterCommit(prevNext, token)`.
+     - *(Keep `remote_secret` / `remote_tradeoff` fallback or route entirely through `remote_turn`.)*
+   - **Host handling Guest's `action_intent` (`handleActionIntent(msg)`):**
+     - Capture `prevNext = Game.getHand(2)` and DOM `from`/`to` rects, hide selected card(s).
+     - Execute `const ok = action === 'secret' ? Game.performSecret(2, idx) : Game.performTradeoff(2, sel)`.
+     - If `!ok`: send `{ type: 'match_sync', view: Game.buildPlayerView(2), history: buildSanitizedHistoryFor(2) }`, `render()`, and return.
+     - **Immediately** send `netSession.send({ type: 'turn_commit', view: Game.buildPlayerView(2) })` **before** `await Fx.flyCard(...)` so Guest never waits on Host's animation!
+     - Run `await Fx.flyCard(...)`, `pushHistory(...)`, and `await afterCommit(prevNext, token)`.
+
+4. **Disconnect Modal Modes, Auto-Reconnect & `match_sync` Recovery:**
+   - Helper `abortInFlightOnlineTurn()`:
+     ```js
+     function abortInFlightOnlineTurn() {
+       gameToken += 1;
+       stopPeek(false);
+       Fx.clearFx();
+       pendingOffer?.cancel?.();
+       pendingOffer = null;
+       pendingAction = null;
+       hiddenDraw = null;
+       animating = false;
+       rejectAllNetSignals();
+       if (Game.state.gameOver) {
+         revealDone = true;
+         resultReady = true;
+       }
+     }
+     ```
+   - Helper `buildSanitizedHistoryFor(viewerSeat)`:
+     Maps `history` so opponent `tradeoff` cards are always `card: null`, and opponent `secret` card is `card: null` unless `Game.state.gameOver` (in which case `Game.state.secretCard[entry.player]`).
+   - Helper `mergeSyncedHistory(remoteHistory)`:
+     Preserves Guest's own known `tradeoff` / `secret` card IDs from local `history` (matched by `id`) while adopting authoritative remote order/entries.
+   - **Intentional Leave (`onPeerLeft` -> `handleNetPeerLeft`):**
+     - If `(gameStarted || Game.state.gameOver) && gameMode === 'online'`:
+       - `gameStarted = false;`
+       - `abortInFlightOnlineTurn();`
+       - Close `netSession` (`netSession.close(false); netSession = null;`).
+       - Open `#disconnect-modal` with `canReconnect = false`:
+         - Title: `'Opponent Left'`
+         - Desc: `'Your opponent left the match.'`
+         - `#disconnect-reconnect-button` hidden; `#disconnect-ok-button` styled `.primary`.
+   - **Unexpected Connection Drop (`onConnectionLost` -> `handleNetConnectionLost`):**
+     - If `(gameStarted || (Game.state.gameOver && resultReady)) && gameMode === 'online'`:
+       - `abortInFlightOnlineTurn();`
+       - `localReadyNext = false; remoteReadyNext = false;`
+       - `render();`
+       - If `localSeat === 1` (Host):
+         - Open `#disconnect-modal` with `canReconnect = true`:
+           - Title: `'Connection Lost'`
+           - Desc: `` `Lost connection to opponent. Waiting for opponent to reconnect to room ${onlineRoomCode}…` ``
+           - `#disconnect-reconnect-button` visible (`'Refresh Room'`), `#disconnect-ok-button` visible (`'Back to Menu'`).
+         - Automatically trigger silent `netSession.reconnect().catch(() => {})` on Host so signaling registration stays live if Host's own network blipped.
+       - If `localSeat === 2` (Guest):
+         - Open `#disconnect-modal` with `canReconnect = true`:
+           - Title: `'Connection Lost'`
+           - Desc: `'Connection interrupted. Attempting to reconnect…'`
+         - Automatically run one reconnect attempt (`attemptOnlineReconnect({ auto: true })`) after 600ms; if that fails, enable `#disconnect-reconnect-button` (`'Reconnect'`) with message `` `Could not reconnect automatically. Check your connection and click Reconnect to rejoin room ${onlineRoomCode}.` ``.
+   - **Manual Reconnect Button (`#disconnect-reconnect-button` -> `attemptOnlineReconnect({ auto: false })`):**
+     - Disables `#disconnect-reconnect-button`, sets text `'Reconnecting…'`, calls `await netSession.reconnect()`.
+     - On Guest: upon success, updates status to `'Connected! Restoring match state…'` (and sends `{ type: 'request_sync' }` as backup in case `match_sync` raced).
+     - On Host: upon success, updates status to `` `Room ${onlineRoomCode} active. Waiting for opponent to reconnect…` ``.
+     - On error: re-enables `#disconnect-reconnect-button` (`'Reconnect'`) and shows `err.message` in `#disconnect-modal-desc`.
+   - **Reconnection Handshake (`onGuestReconnected` on Host & `match_sync` on Guest):**
+     - On Host `handleNetGuestReconnected()` (and on receiving `{ type: 'request_sync' }`):
+       - `abortInFlightOnlineTurn();`
+       - `localReadyNext = false; remoteReadyNext = false;`
+       - Sends `{ type: 'match_sync', round: Game.state.round, view: Game.buildPlayerView(2), history: buildSanitizedHistoryFor(2) }`.
+       - `closeDisconnectModal();`
+       - `render();`
+     - On Guest receiving `{ type: 'match_sync' }` in `handleNetMessage`:
+       - `gameMode = 'online'; localSeat = 2;`
+       - `abortInFlightOnlineTurn();`
+       - `Game.applyPlayerView(msg.view);`
+       - `gameStarted = !Game.state.gameOver || Game.state.winner === 0;`
+       - `revealDone = Boolean(Game.state.gameOver);`
+       - `resultReady = Boolean(Game.state.gameOver);`
+       - `localReadyNext = false; remoteReadyNext = false;`
+       - `mergeSyncedHistory(msg.history || []);`
+       - `els.modeSelectionScreen.classList.add('hidden');`
+       - `closeDisconnectModal();`
+       - `renderHistory(false);`
+       - `render();`
 
 ---
 
 ## Edge Cases
-1. **Strict Hidden-Information Isolation (Anti-Cheat):** Guest never receives `state.deck`, Host's hand card IDs, Host's discarded `tradeoff` card IDs, or Host's `secretCard[1]` before `gameOver`. Host authoritatively validates all Guest `selected` indices and `choice` bounds against `Game.state` before mutating state.
-2. **Perspective Symmetry on Guest (`localSeat === 2`):** Generalizing `localSeat`/`oppSeat()` and `.stack-bottom`/`.stack-top` ensures Guest sees their own hand, secret peek, blue `--player-color` accents, `▼ You` favor badges, and bottom gift stacks identically to Host, with zero inverted stack-count badges or swapped result columns.
-3. **`prefers-reduced-motion` Mismatch Between Browsers:** Separating out-of-band signal resolution (`turn_commit`, `offer_response`, `offer_choice`) from the FIFO `turnQueue` prevents overlapping card flights if one player has reduced motion (10ms animations) and acts again while the other player's 550ms draw animation is still finishing, without ever deadlocking.
-4. **Fast Offer Clicks While Cards Are Still Flying to Tray:** Arming `waitForNetSignal` *before* `netSession.send(...)` guarantees that if the remote player picks a Gift/Competition option before local cards finish landing in `#offer-tray`, the choice is buffered in memory and applied seamlessly right after reveal.
-5. **Stack Offset Accuracy Before `applyPlayerView`:** Both Host and Guest run `distributeOffer(assign)` *before* `Game.performGift`/`Game.performCompetition` or `Game.applyPlayerView(view)` increments `state.geishagifts`, ensuring cards land at the exact top of existing stacks without off-by-one `STACK_OFFSET` jumps.
-6. **Offline Single-Player Resilience:** Lazy-loading PeerJS only when `hostRoom()` or `joinRoom()` is called ensures Single Player vs AI boots and plays 100% offline with zero startup CDN requests, and displays a friendly inline status error if Online Mode is used while offline.
-7. **Mid-Turn Disconnects, Room Collisions & 3rd-Player Intrusions:** `createNetSession` retries room code generation on `unavailable-id`, rejects any 3rd connection with `room_full` without disrupting an active match, runs a 15s ping/pong keepalive, and cleanly aborts pending animations/offers into `#disconnect-modal` if the remote peer drops or leaves.
+1. **Race Between Host Card Flight and `turn_commit` (Root Cause of Secret/Discard Freezes):** Combining Host's `secret` and `tradeoff` into a single `remote_turn` message carrying `view` eliminates the two-message race entirely, while early-signal buffering in `waitForNetSignal` guarantees `offer_response`, `offer_choice`, and `turn_commit` can never be dropped even under extreme jitter or `prefers-reduced-motion` asymmetry.
+2. **Backgrounded Browser Tabs Pausing Web Animations:** Fast-forwarding `Fx.flyCard` and `Fx.wait` when `document.visibilityState === 'hidden'` plus a `dur + del + 350ms` safety timer ensures a minimized/tabbed-out Host or Guest never blocks turn resolution.
+3. **Mid-Offer Disconnects Without State Corruption:** Because `Game.state` only mutates atomically on completed actions, aborting uncommitted UI animations/offers on disconnect and projecting Host's `Game.buildPlayerView(2)` via `match_sync` cleanly restores all offered cards back to the active player's hand at the exact turn boundary with zero card loss or duplication.
+4. **Half-Open NAT Ghost Sockets Blocking Reconnect:** Matching `clientId` inside Host's `hello` handler allows a reconnecting Guest to replace their own stale half-open `activeConn` immediately instead of being falsely rejected with `room_full`, while genuine 3rd players with a different `clientId` are still rejected with `room_full`.
+5. **Guest Rejoining From Fresh Tab With Room Code:** Once Host's old `activeConn` closes (`!activeConn || !activeConn.open`) while `hasHadGuest === true`, a Guest re-entering the 6-character code from **Join Game** is accepted via `onGuestReconnected` and receives `match_sync` to resume the active match seamlessly.
+6. **Rapid Repeated Clicks on `View Board`:** Tracking `suppressNextPeekClick` (cleared immediately after consuming a pointer gesture's synthetic click or on the next `pointerdown`) instead of a 300ms suppression timer lets players click `#peek-restore-button` at any speed in the exact same screen coordinates while preserving press-and-hold peek and keyboard `Enter`/`Space`/`Escape` accessibility.
+7. **Unequal Scores Below Win Thresholds (`10 pts` vs `6 pts`, `< 4` Geishas):** Removing the `scores[1] > scores[2]` fallback in `computeEndgame()` ensures rounds with unowned/tied characters where neither player reached `11+` Charm Points or `4+` Geishas always yield `winner === 0` and advance to Round `N + 1` with `geishalove` preserved.
 
 ---
 
 ## Execution Checklist
-- [x] Step 1: Create `docs/src/net-config.js` and `docs/src/net.js` implementing room code utilities, lazy CDN PeerJS loading (`PeerClass` injectable), host/join session management, `room_full` protection, and ping/pong keepalive.
-- [x] Step 2: Update `docs/src/game.js` to export `buildPlayerView(viewerSeat)` and `applyPlayerView(view)` while preserving all existing exports and default behaviors.
-- [x] Step 3: Update `docs/index.html` to default `#starter-random-button` as selected, rename AI difficulties to `Easy`/`Medium`/`Hard`, add Single Player vs Online 2P setup UI (Host lobby + Join input), and add `#disconnect-modal`.
-- [x] Step 4: Update `docs/src/styles.css` to replace `data-stack` prefix selectors with `.stack-bottom`/`.stack-top` and style the Online 2P setup tabs, room code display/input (`user-select: text`), and compact `.mode-selection-card` layout.
-- [x] Step 5: Update `docs/src/ui.js` to set `startingPlayerPref = 'random'`, rename `DIFF_LABELS` to `Easy`/`Medium`/`Hard`, generalize `localSeat`/`oppSeat()` rendering & animations, and implement Online 2P lobby, `?room=` invite handling, serialized turn protocol, tie/rematch ready handshake, and disconnect modal handling.
-- [x] Step 6: Create `tests/net.test.js` and update `tests/ui.test.js` to test mock P2P sessions, hidden-information masking, full 8-turn + tie-round sync, default `Random` starter, `Easy`/`Medium`/`Hard` labels, and Online 2P UI contracts.
-- [x] Step 7: Update `AGENTS.md` and `README.md` to reflect `Easy`/`Medium`/`Hard` AI names, default Coin Toss starter, Online Two-Player Mode usage, and optional TURN server setup.
-- [x] Step 8: Run `node --check docs/src/game.js docs/src/ai.js docs/src/ui.js docs/src/fx.js docs/src/net.js docs/src/net-config.js` and `npm test` to verify zero syntax errors and 100% passing tests.
+- [x] Step 1: Update `docs/src/game.js` (`computeEndgame` and `finishGame`) to enforce the strict victory rule (win only on `11+` Charm Points or `4+` Geishas, with `11+` points taking precedence; otherwise `winner = 0`).
+- [x] Step 2: Update `docs/src/fx.js` to guard `rectOf()` and prevent hidden-tab / mid-flight Web Animations stalls via `visibilityState` fast-forwarding and a safety completion timer.
+- [x] Step 3: Update `docs/src/net-config.js` (`pingIntervalMs: 5000`, `pongTimeoutMs: 16000`) and `docs/src/net.js` to add `clientId`, signaling `peer.reconnect()` recovery, heartbeat timeout detection, `onConnectionLost` vs `onPeerLeft`, Host `onGuestReconnected` acceptance, and `session.reconnect()`.
+- [x] Step 4: Update `docs/index.html` to rename `Online 2P` to `Online Two Player`, add `#icon-single-player` and `#icon-two-player` SVG icons to the mode buttons, and add `#disconnect-reconnect-button` to `#disconnect-modal`.
+- [x] Step 5: Update `docs/src/styles.css` to style `.mode-btn-icon` and position `#peek-restore-button` in the non-blocking right-board corridor (`left: 1468px; top: 426px`) with fixed geometry across `View Board` and `Show Offer`/`Show Summary` states.
+- [x] Step 6: Update `docs/src/ui.js` to wire the persistent in-place `#peek-restore-button` toggle (removing the inline `#offer-tray` peek button), reset abandoned Host/Join lobbies via `resetOnlineLobbyUI()`, fix signal/offer cancellation, implement atomic `remote_turn` + immediate `turn_commit`, and wire auto + manual reconnection (`match_sync`).
+- [x] Step 7: Update `tests/game.test.js`, `tests/simulation.test.js`, `tests/net.test.js`, and `tests/ui.test.js` to verify the strict win condition, reconnection & timeout flows, lobby reset, renamed button + icons, and persistent `View Board` toggle.
+- [x] Step 8: Update `AGENTS.md` and `README.md` to reflect `Online Two Player`, strict victory rules, match reconnection, and the persistent non-blocking `View Board` button, then run `node --check docs/src/game.js docs/src/ai.js docs/src/ui.js docs/src/fx.js docs/src/net.js docs/src/net-config.js` and `npm test`.

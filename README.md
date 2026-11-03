@@ -16,8 +16,9 @@ Compete locally against an AI engine featuring **3 difficulty levels** (Easy, Me
   - **Hard:** Card counting, minimax partition for Competition, maximin evaluation for Gift offers, and strategic win-condition / threat mitigation.
 - **Viewport-Scaled Tabletop Stage:** Fixed 1760×900 presentation scaled smoothly to fit any viewport with zero scrolling, custom card artwork, hover-to-peek secret slots, and icon actions with tooltips.
 - **Animated Card Flights & History Rail:** Web Animations API 3D card flights and flips for every draw, secret, discard, offer, and endgame reveal, paired with a colour-coded move history rail (blue = You, red = Opponent/Computer).
-- **Flexible Match Setup:** Choose between Single Player (`Easy`, `Medium`, or `Hard`) and Online 2P (`Host Room` or `Join Room`), with Round 1 starting player defaulting to **Random** (Coin toss).
-- **View Board Peek Mode:** Hold or click the **View Board** button on Gift/Competition offers or round-end summary cards to briefly hide the popup, un-dim the central board, and inspect character favor, card counts, and move history before deciding.
+- **Flexible Match Setup:** Choose between Single Player (`Easy`, `Medium`, or `Hard`) and Online Two Player (`Host Room` or `Join Room`), with intuitive 1P/2P icons and Round 1 starting player defaulting to **Random** (Coin toss).
+- **Persistent View Board Peek Mode:** Hold or click the **View Board** button on Gift/Competition offers or round-end summary cards to hide the popup, un-dim the central board, and inspect character favor, card counts, and move history before deciding. It sits in a dedicated corridor on the right side of the board and stays in the exact same spot whether the offer is hidden or shown, enabling rapid repeated clicking back-and-forth between cards and the board.
+- **Match Reconnection & Lobby Reset:** If an online match is interrupted or dropped, built-in heartbeat detection and reconnection restore match state via Host synchronization without corruption. Abandoned host rooms cleanly reset to the Create Room screen.
 - **Visual Competition Pairing:** Real-time `1` and `2` pair badges on selected hand cards so you control exact competition splits.
 - **Automated Test Suite:** Built-in unit, networking, and simulation tests using Node.js's native test runner (`node:test`).
 
@@ -27,8 +28,9 @@ Compete locally against an AI engine featuring **3 difficulty levels** (Easy, Me
 
 ### 1. Playing Online (Out-of-the-Box)
 No server installation or account setup is required to play online.
-- **Host:** Select **Online 2P → Host Game**, choose starting player preference (defaults to **Random / Coin toss**), and click **Create Room**. Copy the 6-character room code or click **Copy Invite Link** and share it with your friend.
-- **Guest:** Open the shared invite link (which auto-fills the room code) or select **Online 2P → Join Game**, enter the 6-character code, and click **Join Room**.
+- **Host:** Select **Online Two Player → Host Game**, choose starting player preference (defaults to **Random / Coin toss**), and click **Create Room**. Copy the 6-character room code or click **Copy Invite Link** and share it with your friend.
+- **Guest:** Open the shared invite link (which auto-fills the room code) or select **Online Two Player → Join Game**, enter the 6-character code, and click **Join Room**.
+- **Reconnecting:** If a network drop occurs, automatic and manual **Reconnect** options allow resuming the match seamlessly. When abandoning a game, the lobby cleanly returns to the Create Room screen.
 
 ### 2. GitHub Pages Deployment
 1. Go to repository **Settings → Pages**.
@@ -64,8 +66,8 @@ The deck contains exactly **21 item cards**. At the start of the round, 1 card i
 After 8 total turns (4 per player), all secret cards are revealed and character majorities are evaluated:
 - A player wins if they achieve **11 or more Charm Points** OR the favor of **4 or more Characters**.
 - **Precedence Rule:** If one player achieves 11+ Charm Points and the other achieves 4+ Characters, the player with **11+ Charm Points wins**.
-- Tiebreaker falls back to the higher total Charm Points.
-- **Starting Player & Multi-Round Play:** Before starting a new game, you can select whether **You**, **Computer**, or **Random** goes first in Round 1. If neither player meets a victory condition after 8 turns, the round ends in a tie: all character favor states carry over, the starting player alternates cleanly from the prior round's starter, and you can launch the next round upon approval until someone wins.
+- **Strict Win Condition & Multi-Round Play:** Victory strictly requires achieving at least 11 Charm Points or 4+ Characters. If neither player achieves either threshold after 8 turns, no one wins that round (even if total points are unequal), all character favor states carry over, and the match proceeds to the next round with the starting player alternating until someone reaches a win condition.
+- **Starting Player Selection:** Before starting a new game, you can select whether **You**, **Computer**, or **Random** goes first in Round 1.
 - **New Game Confirmation:** If a game is in progress, clicking the New Game button displays a confirmation dialog to prevent accidental restarts.
 
 ---

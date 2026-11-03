@@ -305,9 +305,10 @@ export function computeEndgame() {
   const p1Geishas = state.geishaCount[1] >= 4;
   const p2Geishas = state.geishaCount[2] >= 4;
 
-  // Official Hanamikoji rule:
-  // If one player wins 11+ points and the other wins 4+ geishas,
-  // the player with 11+ charm points wins!
+  // Victory requires 11+ Charm Points OR 4+ Geishas.
+  // If one player achieves 11+ Charm Points and the other achieves 4+ Geishas,
+  // the player with 11+ Charm Points wins. Otherwise, no one wins and play
+  // continues to the next round (winner = 0).
   if (p1Points && !p2Points) {
     state.winner = 1;
   } else if (p2Points && !p1Points) {
@@ -315,10 +316,6 @@ export function computeEndgame() {
   } else if (p1Geishas && !p2Geishas) {
     state.winner = 1;
   } else if (p2Geishas && !p1Geishas) {
-    state.winner = 2;
-  } else if (state.scores[1] > state.scores[2]) {
-    state.winner = 1;
-  } else if (state.scores[2] > state.scores[1]) {
     state.winner = 2;
   } else {
     state.winner = 0;
@@ -329,7 +326,7 @@ function finishGame() {
   computeEndgame();
   state.gameOver = true;
   if (state.winner === 0) {
-    state.message = `Round ${state.round} ended in a tie!`;
+    state.message = `No winner in Round ${state.round} — advancing to next round!`;
   } else {
     state.message = `Game over! Player ${state.winner} wins.`;
   }

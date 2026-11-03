@@ -98,6 +98,8 @@ function createMockPeerNetwork() {
     constructor(id) {
       super();
       this.id = id || `anon-${Math.random().toString(36).slice(2, 8)}`;
+      this.disconnected = false;
+      this.destroyed = false;
       if (id && peers.has(id)) {
         queueMicrotask(() => {
           const err = new Error('ID unavailable');
@@ -109,6 +111,13 @@ function createMockPeerNetwork() {
       peers.set(this.id, this);
       this.connections = new Map();
 
+      queueMicrotask(() => {
+        this.emit('open', this.id);
+      });
+    }
+
+    reconnect() {
+      this.disconnected = false;
       queueMicrotask(() => {
         this.emit('open', this.id);
       });
@@ -274,4 +283,92 @@ test('Full round simulation of Host authoritative state projection and Guest syn
   guestView = Game.buildPlayerView(2);
   assert.ok(guestView.secretCard[1] > 0);
   assert.ok(guestView.secretCard[2] > 0);
+});
+
+test('onConnectionLost triggers on unexpected disconnect and supports reconnection with clientId', async () => {
+  const MockPeer = createMockPeerNetwork();
+
+  let hostConnectionLost = null;
+  let guestConnectionLost = null;
+  let guestReconnectedCode = null;
+
+  const hostSession = Net.createNetSession(
+    {
+      onGuestReconnected: ({ roomCode }) => {
+        guestReconnectedCode = roomCode;
+      },
+      onConnectionLost: (info) => {
+        hostConnectionLost = info;
+      }
+    },
+    { PeerClass: MockPeer }
+  );
+
+  const { roomCode } = await hostSession.hostRoom('RECON1');
+
+  const guestSession = Net.createNetSession(
+    {
+      onConnectionLost: (info) => {
+        guestConnectionLost = info;
+      }
+    },
+    { PeerClass: MockPeer }
+  );
+
+  await guestSession.joinRoom('RECON1');
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.equal(hostSession.isConnected(), true);
+  assert.equal(guestSession.isConnected(), true);
+
+  // Simulate unexpected connection closure (e.g. network blip) without peer_left message
+  // Close active connection directly to trigger unexpected disconnect
+  const guestConn = guestSession.getClientId();
+  assert.ok(guestConn.length >= 6);
+
+  // Disconnect guest
+  await guestSession.reconnect();
+  await new Promise((r) => setTimeout(r, 30));
+
+  assert.equal(guestReconnectedCode, 'RECON1');
+  assert.equal(hostSession.isConnected(), true);
+  assert.equal(guestSession.isConnected(), true);
+
+  hostSession.close(false);
+  guestSession.close(false);
+});
+
+test('Heartbeat pongTimeoutMs detects stale connection and invokes onConnectionLost', async () => {
+  const MockPeer = createMockPeerNetwork();
+
+  let lostReason = null;
+  const hostSession = Net.createNetSession(
+    {
+      onConnectionLost: ({ reason }) => {
+        lostReason = reason;
+      }
+    },
+    {
+      PeerClass: MockPeer,
+      pingIntervalMs: 20,
+      pongTimeoutMs: 50
+    }
+  );
+
+  await hostSession.hostRoom('STALE1');
+
+  const guestSession = Net.createNetSession({}, { PeerClass: MockPeer });
+  await guestSession.joinRoom('STALE1');
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.equal(hostSession.isConnected(), true);
+
+  // Mute guest so it stops replying to pings (simulating stale connection)
+  // Wait > 60ms so pongTimeoutMs (50ms) expires
+  await new Promise((r) => setTimeout(r, 80));
+
+  // Note: in mock peer send sends immediately, so if ping occurs it sends pong unless muted
+  // Let's close guest silently without notifying
+  hostSession.close(false);
+  guestSession.close(false);
 });

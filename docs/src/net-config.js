@@ -1,7 +1,8 @@
 export const NET_CONFIG = {
   roomPrefix: 'seven-favors-v1-',
   connectTimeoutMs: 12000,
-  pingIntervalMs: 15000,
+  pingIntervalMs: 5000,
+  pongTimeoutMs: 16000,
   cdnUrls: [
     'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js',
     'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'

@@ -123,7 +123,7 @@ test('Multi-round tie simulation continues rounds until a decisive winner is rea
     playOneRound(p1Diff, p2Diff);
 
     let roundsPlayed = 1;
-    while (Game.state.winner === 0 && roundsPlayed < 10) {
+    while (Game.state.winner === 0 && roundsPlayed < 25) {
       const prevStarter = Game.state.roundStarter;
       const prevRound = Game.state.round;
       const ok = Game.startNextRound();
@@ -140,6 +140,8 @@ test('Multi-round tie simulation continues rounds until a decisive winner is rea
     assert.ok([1, 2].includes(Game.state.winner));
     const summary = Game.getResultSummary();
     assert.ok(summary.winner === 1 || summary.winner === 2);
+    const winRes = summary.winner === 1 ? summary.player1 : summary.player2;
+    assert.ok(winRes.score >= 11 || winRes.geishaCount >= 4, 'Winner must have 11+ points or 4+ geishas');
     assert.equal(summary.round, roundsPlayed);
     const expectedFinalStarter = roundsPlayed % 2 === 1 ? r1Starter : Game.other(r1Starter);
     assert.equal(summary.roundStarter, expectedFinalStarter);
