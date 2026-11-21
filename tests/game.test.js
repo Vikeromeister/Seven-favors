@@ -14,8 +14,11 @@ test('Game setup and initialization', () => {
   assert.equal(Game.getHand(1).length, 7);
   // Player 2 has 6 dealt = 6 cards
   assert.equal(Game.getHand(2).length, 6);
-  // Deck: 21 - 12 dealt - 1 drawn = 8 cards remaining
-  assert.equal(Game.state.deck.length, 8);
+  // Deck: 21 - 1 removed face-down - 12 dealt - 1 drawn = 7 cards remaining
+  assert.equal(Game.state.deck.length, 7);
+  assert.ok(Number.isInteger(Game.state.removedCard) && Game.state.removedCard >= 1 && Game.state.removedCard <= 7);
+  assert.equal('removedCard' in Game.buildPlayerView(1), false);
+  assert.equal('removedCard' in Game.buildPlayerView(2), false);
 
   // Actions available
   for (const player of [1, 2]) {
@@ -176,6 +179,7 @@ test('Full round: 8 turns triggers endgame scoring', () => {
   Game.performCompetition(2, [0, 1, 2, 3], 1);
 
   assert.equal(Game.state.turnsTaken, 8);
+  assert.equal(Game.state.deck.length, 0);
   assert.equal(Game.state.gameOver, true);
   assert.ok([0, 1, 2].includes(Game.state.winner));
 
@@ -258,7 +262,7 @@ test('Selectable starting player (1, 2, random), full round with Player 2 starti
   assert.equal(Game.state.currentPlayer, 1);
   assert.equal(Game.getHand(1).length, 7);
   assert.equal(Game.getHand(2).length, 6);
-  assert.equal(Game.state.deck.length, 8);
+  assert.equal(Game.state.deck.length, 7);
 
   // Explicit Player 2 start + full 8-turn round completion
   Game.startGame(2);
@@ -267,7 +271,7 @@ test('Selectable starting player (1, 2, random), full round with Player 2 starti
   assert.equal(Game.state.currentPlayer, 2);
   assert.equal(Game.getHand(2).length, 7);
   assert.equal(Game.getHand(1).length, 6);
-  assert.equal(Game.state.deck.length, 8);
+  assert.equal(Game.state.deck.length, 7);
 
   assert.equal(Game.performSecret(2, 0), true);
   assert.equal(Game.state.currentPlayer, 1);
@@ -281,6 +285,7 @@ test('Selectable starting player (1, 2, random), full round with Player 2 starti
   assert.equal(Game.performCompetition(1, [0, 1, 2, 3], 1), true);
 
   assert.equal(Game.state.turnsTaken, 8);
+  assert.equal(Game.state.deck.length, 0);
   assert.equal(Game.state.gameOver, true);
   assert.equal(Game.getResultSummary().roundStarter, 2);
 
@@ -383,4 +388,37 @@ test('Strict win condition: victory requires 11+ points or 4+ geishas; unequal p
   assert.equal(Game.state.scores[2], 9);
   assert.equal(Game.state.geishaCount[2], 4);
   assert.equal(Game.state.winner, 2);
+});
+
+test('performGift preserves caller cardIndexes order for chosenOfferIndex', () => {
+  Game.startGame(1);
+  Game.state.players[1].hand = [7, 6, 5, 4, 3, 2, 1];
+  // Unsorted indices: index 0 of offer -> hand[4] = 3, index 1 -> hand[0] = 7, index 2 -> hand[2] = 5
+  const ok = Game.performGift(1, [4, 0, 2], 0);
+  assert.equal(ok, true);
+  assert.equal(Game.state.geishagifts[2][3], 1);
+  assert.equal(Game.state.geishagifts[1][7], 1);
+  assert.equal(Game.state.geishagifts[1][5], 1);
+});
+
+test('Action functions reject out-of-turn, post-gameOver, and non-integer index calls', () => {
+  Game.startGame(1);
+  // Out of turn (Player 2 cannot act on Player 1's turn)
+  assert.equal(Game.performSecret(2, 0), false);
+  assert.equal(Game.performTradeoff(2, [0, 1]), false);
+  assert.equal(Game.performGift(2, [0, 1, 2], 0), false);
+  assert.equal(Game.performCompetition(2, [0, 1, 2, 3], 1), false);
+
+  // Non-integer index in performSecret
+  assert.equal(Game.performSecret(1, 0.5), false);
+  assert.equal(Game.performSecret(1, '0'), false);
+  assert.equal(Game.performSecret(1, NaN), false);
+  assert.equal(Game.state.currentPlayer, 1);
+
+  // Post-gameOver rejection
+  Game.state.gameOver = true;
+  assert.equal(Game.performSecret(1, 0), false);
+  assert.equal(Game.performTradeoff(1, [0, 1]), false);
+  assert.equal(Game.performGift(1, [0, 1, 2], 0), false);
+  assert.equal(Game.performCompetition(1, [0, 1, 2, 3], 1), false);
 });

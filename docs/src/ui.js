@@ -440,7 +440,7 @@ function updateTopBar() {
 function buildOpponentZone() {
   const opp = oppSeat();
   const oppSecret = Game.state.secretCard[opp];
-  const showSecret = oppSecret !== null && oppSecret !== 0 && !(Game.state.gameOver && revealDone);
+  const showSecret = oppSecret !== null && !(Game.state.gameOver && revealDone);
   els.opponentSecret.replaceChildren(
     showSecret ? makeCard(null, 'var(--h-opp)') : makeEmptySlot('var(--h-opp)')
   );
@@ -705,6 +705,11 @@ function renderOfferTray() {
   }
 
   els.offerTray.replaceChildren(...nodes);
+  if (!canPeekBoard() && peekState !== 'closed') {
+    stopPeek(false);
+  } else {
+    updatePeekUI();
+  }
 }
 
 function buildResultPanel() {
@@ -783,7 +788,16 @@ function buildResultPanel() {
     const actionBtn = document.createElement('button');
     actionBtn.className = 'primary restart-result-btn';
     actionBtn.type = 'button';
-    actionBtn.textContent = isTie ? `Start Round ${result.round + 1}` : 'Rematch';
+    if (localReadyNext) {
+      actionBtn.textContent = 'Waiting for opponent…';
+      actionBtn.disabled = true;
+    } else if (remoteReadyNext) {
+      actionBtn.textContent = isTie
+        ? `Start Round ${result.round + 1} (Opponent ready)`
+        : 'Rematch (Opponent ready)';
+    } else {
+      actionBtn.textContent = isTie ? `Start Round ${result.round + 1}` : 'Rematch';
+    }
 
     actionBtn.addEventListener('click', () => {
       if (peekState !== 'closed') return;
@@ -943,6 +957,7 @@ async function confirmSelection() {
       await playHumanTurn(type, [...selected]);
     }
   } catch (err) {
+    if (err?.abort) return;
     console.error(err);
     stopPeek(false);
     Fx.clearFx();
@@ -1677,6 +1692,13 @@ async function playOnlineLocalTurn(type, selected) {
 
       const { choice } = await responsePromise;
       if (token !== gameToken) return;
+      if (typeof choice !== 'number' || !Number.isInteger(choice) || choice < 0 || choice >= 3) {
+        pendingOffer = null;
+        sendMatchSyncToGuest();
+        animating = false;
+        render();
+        return;
+      }
 
       pendingOffer.chosen = choice;
       renderOfferTray();
@@ -1689,7 +1711,12 @@ async function playOnlineLocalTurn(type, selected) {
       if (token !== gameToken) return;
 
       pendingOffer = null;
-      Game.performGift(1, sel, choice);
+      if (!Game.performGift(1, sel, choice)) {
+        sendMatchSyncToGuest();
+        animating = false;
+        render();
+        return;
+      }
       netSession.send({ type: 'turn_commit', view: Game.buildPlayerView(2) });
       pushHistory({
         player: 1,
@@ -1740,6 +1767,13 @@ async function playOnlineLocalTurn(type, selected) {
 
       const { choice } = await responsePromise;
       if (token !== gameToken) return;
+      if (choice !== 0 && choice !== 1) {
+        pendingOffer = null;
+        sendMatchSyncToGuest();
+        animating = false;
+        render();
+        return;
+      }
 
       pendingOffer.chosen = choice;
       renderOfferTray();
@@ -1752,7 +1786,12 @@ async function playOnlineLocalTurn(type, selected) {
       if (token !== gameToken) return;
 
       pendingOffer = null;
-      Game.performCompetition(1, sel, choice + 1);
+      if (!Game.performCompetition(1, sel, choice + 1)) {
+        sendMatchSyncToGuest();
+        animating = false;
+        render();
+        return;
+      }
       netSession.send({ type: 'turn_commit', view: Game.buildPlayerView(2) });
       pushHistory({
         player: 1,
@@ -1964,16 +2003,110 @@ async function playOnlineLocalTurn(type, selected) {
   }
 }
 
+function sendMatchSyncToGuest() {
+  netSession?.send({
+    type: 'match_sync',
+    round: Game.state.round,
+    view: Game.buildPlayerView(2),
+    history: buildSanitizedHistoryFor(2)
+  });
+}
+
+function isValidRemoteSelection(handLen, selected, expectedCount) {
+  if (!Array.isArray(selected) || selected.length !== expectedCount) {
+    return false;
+  }
+  const seen = new Set();
+  for (const idx of selected) {
+    if (!Number.isInteger(idx) || idx < 0 || idx >= handLen || seen.has(idx)) {
+      return false;
+    }
+    seen.add(idx);
+  }
+  return true;
+}
+
 async function handleRemoteTurn(msg) {
   const token = gameToken;
   const { action, selected, view } = msg;
+  animating = true;
+  updateActionBar();
 
-  if (action === 'secret') {
-    const idx = selected[0];
+  try {
+    if (action === 'secret') {
+      const idx = selected[0];
+      const src = handEl(1, idx);
+      const from = Fx.rectOf(src);
+      const to = Fx.rectOf(els.opponentSecret.firstElementChild);
+      if (src) src.style.visibility = 'hidden';
+
+      await Fx.flyCard({
+        from,
+        to,
+        frontSrc: null,
+        backSrc: CARD_BACK,
+        startFaceUp: false,
+        endFaceUp: false
+      });
+      if (token !== gameToken) return;
+
+      const prevNext = Game.getHand(2);
+      Game.applyPlayerView(view);
+      pushHistory({ player: 1, action: 'secret', cards: [{ card: null, to: 'secret' }] });
+      await afterCommit(prevNext, token);
+      return;
+    }
+
+    if (action === 'tradeoff') {
+      const sel = selected;
+      const froms = sel.map((i) => Fx.rectOf(handEl(1, i)));
+      const to = Fx.rectOf(els.discardPile);
+      sel.forEach((i) => {
+        const el = handEl(1, i);
+        if (el) el.style.visibility = 'hidden';
+      });
+
+      await Promise.all(sel.map((_, k) => Fx.flyCard({
+        from: froms[k],
+        to,
+        frontSrc: null,
+        backSrc: CARD_BACK,
+        startFaceUp: false,
+        endFaceUp: false,
+        delay: k * 120
+      })));
+      if (token !== gameToken) return;
+
+      const prevNext = Game.getHand(2);
+      Game.applyPlayerView(view);
+      pushHistory({
+        player: 1,
+        action: 'tradeoff',
+        cards: sel.map(() => ({ card: null, to: 'discard' }))
+      });
+      await afterCommit(prevNext, token);
+    }
+  } catch (err) {
+    if (err?.abort || token !== gameToken) return;
+    console.error(err);
+    stopPeek(false);
+    Fx.clearFx();
+    pendingOffer = null;
+    animating = false;
+    render();
+  }
+}
+
+async function handleRemoteSecret(msg) {
+  const token = gameToken;
+  animating = true;
+  updateActionBar();
+  try {
+    const idx = msg.selected[0];
     const src = handEl(1, idx);
     const from = Fx.rectOf(src);
     const to = Fx.rectOf(els.opponentSecret.firstElementChild);
-    src.style.visibility = 'hidden';
+    if (src) src.style.visibility = 'hidden';
 
     await Fx.flyCard({
       from,
@@ -1985,18 +2118,36 @@ async function handleRemoteTurn(msg) {
     });
     if (token !== gameToken) return;
 
+    const commit = await waitForNetSignal('turn_commit');
+    if (token !== gameToken) return;
+
     const prevNext = Game.getHand(2);
-    Game.applyPlayerView(view);
+    Game.applyPlayerView(commit.view);
     pushHistory({ player: 1, action: 'secret', cards: [{ card: null, to: 'secret' }] });
     await afterCommit(prevNext, token);
-    return;
+  } catch (err) {
+    if (err?.abort || token !== gameToken) return;
+    console.error(err);
+    stopPeek(false);
+    Fx.clearFx();
+    pendingOffer = null;
+    animating = false;
+    render();
   }
+}
 
-  if (action === 'tradeoff') {
-    const sel = selected;
+async function handleRemoteTradeoff(msg) {
+  const token = gameToken;
+  animating = true;
+  updateActionBar();
+  try {
+    const sel = msg.selected;
     const froms = sel.map((i) => Fx.rectOf(handEl(1, i)));
     const to = Fx.rectOf(els.discardPile);
-    sel.forEach((i) => { handEl(1, i).style.visibility = 'hidden'; });
+    sel.forEach((i) => {
+      const el = handEl(1, i);
+      if (el) el.style.visibility = 'hidden';
+    });
 
     await Promise.all(sel.map((_, k) => Fx.flyCard({
       from: froms[k],
@@ -2009,287 +2160,315 @@ async function handleRemoteTurn(msg) {
     })));
     if (token !== gameToken) return;
 
+    const commit = await waitForNetSignal('turn_commit');
+    if (token !== gameToken) return;
+
     const prevNext = Game.getHand(2);
-    Game.applyPlayerView(view);
+    Game.applyPlayerView(commit.view);
     pushHistory({
       player: 1,
       action: 'tradeoff',
       cards: sel.map(() => ({ card: null, to: 'discard' }))
     });
     await afterCommit(prevNext, token);
+  } catch (err) {
+    if (err?.abort || token !== gameToken) return;
+    console.error(err);
+    stopPeek(false);
+    Fx.clearFx();
+    pendingOffer = null;
+    animating = false;
+    render();
   }
-}
-
-async function handleRemoteSecret(msg) {
-  const token = gameToken;
-  const idx = msg.selected[0];
-  const src = handEl(1, idx);
-  const from = Fx.rectOf(src);
-  const to = Fx.rectOf(els.opponentSecret.firstElementChild);
-  src.style.visibility = 'hidden';
-
-  await Fx.flyCard({
-    from,
-    to,
-    frontSrc: null,
-    backSrc: CARD_BACK,
-    startFaceUp: false,
-    endFaceUp: false
-  });
-  if (token !== gameToken) return;
-
-  const commit = await waitForNetSignal('turn_commit');
-  if (token !== gameToken) return;
-
-  const prevNext = Game.getHand(2);
-  Game.applyPlayerView(commit.view);
-  pushHistory({ player: 1, action: 'secret', cards: [{ card: null, to: 'secret' }] });
-  await afterCommit(prevNext, token);
-}
-
-async function handleRemoteTradeoff(msg) {
-  const token = gameToken;
-  const sel = msg.selected;
-  const froms = sel.map((i) => Fx.rectOf(handEl(1, i)));
-  const to = Fx.rectOf(els.discardPile);
-  sel.forEach((i) => { handEl(1, i).style.visibility = 'hidden'; });
-
-  await Promise.all(sel.map((_, k) => Fx.flyCard({
-    from: froms[k],
-    to,
-    frontSrc: null,
-    backSrc: CARD_BACK,
-    startFaceUp: false,
-    endFaceUp: false,
-    delay: k * 120
-  })));
-  if (token !== gameToken) return;
-
-  const commit = await waitForNetSignal('turn_commit');
-  if (token !== gameToken) return;
-
-  const prevNext = Game.getHand(2);
-  Game.applyPlayerView(commit.view);
-  pushHistory({
-    player: 1,
-    action: 'tradeoff',
-    cards: sel.map(() => ({ card: null, to: 'discard' }))
-  });
-  await afterCommit(prevNext, token);
 }
 
 async function handleRemoteOfferMade(msg) {
   const token = gameToken;
   const { kind, selected, cards } = msg;
-  pendingOffer = {
-    kind,
-    offerer: 1,
-    cards,
-    revealed: false,
-    interactive: false,
-    chosen: null,
-    hidden: new Set(),
-    resolve: null
-  };
-  renderOfferTray();
+  animating = true;
+  updateActionBar();
 
-  const froms = selected.map((i) => Fx.rectOf(handEl(1, i)));
-  const tos = cards.map((_, k) => Fx.rectOf(els.offerTray.querySelector(`[data-slot="${k}"]`)));
-  selected.forEach((i) => { handEl(1, i).style.visibility = 'hidden'; });
+  try {
+    pendingOffer = {
+      kind,
+      offerer: 1,
+      cards,
+      revealed: false,
+      interactive: false,
+      chosen: null,
+      hidden: new Set(),
+      resolve: null
+    };
+    renderOfferTray();
 
-  const clones = await Promise.all(cards.map((card, k) => Fx.flyCard({
-    from: froms[k],
-    to: tos[k],
-    frontSrc: cardFront(card),
-    backSrc: CARD_BACK,
-    startFaceUp: false,
-    endFaceUp: true,
-    delay: k * 90,
-    keep: true
-  })));
-  if (token !== gameToken) return;
+    const froms = selected.map((i) => Fx.rectOf(handEl(1, i)));
+    const tos = cards.map((_, k) => Fx.rectOf(els.offerTray.querySelector(`[data-slot="${k}"]`)));
+    selected.forEach((i) => {
+      const el = handEl(1, i);
+      if (el) el.style.visibility = 'hidden';
+    });
 
-  pendingOffer.revealed = true;
-  renderOfferTray();
-  clones.forEach((c) => c.remove());
+    const clones = await Promise.all(cards.map((card, k) => Fx.flyCard({
+      from: froms[k],
+      to: tos[k],
+      frontSrc: cardFront(card),
+      backSrc: CARD_BACK,
+      startFaceUp: false,
+      endFaceUp: true,
+      delay: k * 90,
+      keep: true
+    })));
+    if (token !== gameToken) return;
 
-  const commitPromise = waitForNetSignal('turn_commit');
-  const choice = await awaitHumanChoice();
-  if (token !== gameToken) return;
+    pendingOffer.revealed = true;
+    renderOfferTray();
+    clones.forEach((c) => c.remove());
 
-  netSession.send({ type: 'offer_response', choice });
-  pendingOffer.chosen = choice;
-  renderOfferTray();
+    const commitPromise = waitForNetSignal('turn_commit');
+    const choice = await awaitHumanChoice();
+    if (token !== gameToken) return;
 
-  await Fx.wait(250);
-  if (token !== gameToken) return;
+    netSession.send({ type: 'offer_response', choice });
+    pendingOffer.chosen = choice;
+    renderOfferTray();
 
-  const assign = kind === 'gift'
-    ? cards.map((_, k) => (k === choice ? 2 : 1))
-    : cards.map((_, k) => (Math.floor(k / 2) === choice ? 2 : 1));
-  await distributeOffer(assign);
-  if (token !== gameToken) return;
+    await Fx.wait(250);
+    if (token !== gameToken) return;
 
-  pendingOffer = null;
-  const commit = await commitPromise;
-  if (token !== gameToken) return;
+    const assign = kind === 'gift'
+      ? cards.map((_, k) => (k === choice ? 2 : 1))
+      : cards.map((_, k) => (Math.floor(k / 2) === choice ? 2 : 1));
+    await distributeOffer(assign);
+    if (token !== gameToken) return;
 
-  const prevNext = Game.getHand(2);
-  Game.applyPlayerView(commit.view);
-  pushHistory({
-    player: 1,
-    action: kind,
-    cards: cards.map((card, k) => ({ card, to: assign[k] }))
-  });
-  await afterCommit(prevNext, token);
+    pendingOffer = null;
+    const commit = await commitPromise;
+    if (token !== gameToken) return;
+
+    const prevNext = Game.getHand(2);
+    Game.applyPlayerView(commit.view);
+    pushHistory({
+      player: 1,
+      action: kind,
+      cards: cards.map((card, k) => ({ card, to: assign[k] }))
+    });
+    await afterCommit(prevNext, token);
+  } catch (err) {
+    if (err?.abort || token !== gameToken) return;
+    console.error(err);
+    stopPeek(false);
+    Fx.clearFx();
+    pendingOffer = null;
+    animating = false;
+    render();
+  }
 }
 
 async function handleActionIntent(msg) {
   const token = gameToken;
   const { action, selected } = msg;
-  const prevNext = Game.getHand(2);
+  animating = true;
+  updateActionBar();
 
-  if (action === 'secret') {
-    const idx = selected[0];
-    const src = handEl(2, idx);
-    const from = Fx.rectOf(src);
-    const to = Fx.rectOf(els.opponentSecret.firstElementChild);
-    src.style.visibility = 'hidden';
-
-    const ok = Game.performSecret(2, idx);
-    if (!ok) {
-      netSession?.send({
-        type: 'match_sync',
-        round: Game.state.round,
-        view: Game.buildPlayerView(2),
-        history: buildSanitizedHistoryFor(2)
-      });
+  try {
+    const hand2 = Game.getHand(2);
+    const expectedLen = action === 'secret' ? 1 : action === 'tradeoff' ? 2 : 0;
+    if (
+      expectedLen === 0 ||
+      Game.state.gameOver ||
+      Game.state.currentPlayer !== 2 ||
+      !Game.canUseAction(2, action) ||
+      !isValidRemoteSelection(hand2.length, selected, expectedLen)
+    ) {
+      sendMatchSyncToGuest();
+      animating = false;
       render();
       return;
     }
-    netSession?.send({ type: 'turn_commit', view: Game.buildPlayerView(2) });
 
-    await Fx.flyCard({
-      from,
-      to,
-      frontSrc: null,
-      backSrc: CARD_BACK,
-      startFaceUp: false,
-      endFaceUp: false
-    });
-    if (token !== gameToken) return;
+    const prevNext = Game.getHand(1);
 
-    pushHistory({ player: 2, action: 'secret', cards: [{ card: null, to: 'secret' }] });
-    await afterCommit(prevNext, token);
-    return;
-  }
+    if (action === 'secret') {
+      const idx = selected[0];
+      const src = handEl(2, idx);
+      const from = Fx.rectOf(src);
+      const to = Fx.rectOf(els.opponentSecret.firstElementChild);
+      if (src) src.style.visibility = 'hidden';
 
-  if (action === 'tradeoff') {
-    const sel = [...selected];
-    const froms = sel.map((i) => Fx.rectOf(handEl(2, i)));
-    const to = Fx.rectOf(els.discardPile);
-    sel.forEach((i) => { handEl(2, i).style.visibility = 'hidden'; });
+      const ok = Game.performSecret(2, idx);
+      if (!ok) {
+        sendMatchSyncToGuest();
+        animating = false;
+        render();
+        return;
+      }
+      netSession?.send({ type: 'turn_commit', view: Game.buildPlayerView(2) });
 
-    const ok = Game.performTradeoff(2, sel);
-    if (!ok) {
-      netSession?.send({
-        type: 'match_sync',
-        round: Game.state.round,
-        view: Game.buildPlayerView(2),
-        history: buildSanitizedHistoryFor(2)
+      await Fx.flyCard({
+        from,
+        to,
+        frontSrc: null,
+        backSrc: CARD_BACK,
+        startFaceUp: false,
+        endFaceUp: false
       });
-      render();
+      if (token !== gameToken) return;
+
+      pushHistory({ player: 2, action: 'secret', cards: [{ card: null, to: 'secret' }] });
+      await afterCommit(prevNext, token);
       return;
     }
-    netSession?.send({ type: 'turn_commit', view: Game.buildPlayerView(2) });
 
-    await Promise.all(sel.map((_, k) => Fx.flyCard({
-      from: froms[k],
-      to,
-      frontSrc: null,
-      backSrc: CARD_BACK,
-      startFaceUp: false,
-      endFaceUp: false,
-      delay: k * 120
-    })));
-    if (token !== gameToken) return;
+    if (action === 'tradeoff') {
+      const sel = [...selected];
+      const froms = sel.map((i) => Fx.rectOf(handEl(2, i)));
+      const to = Fx.rectOf(els.discardPile);
+      sel.forEach((i) => {
+        const el = handEl(2, i);
+        if (el) el.style.visibility = 'hidden';
+      });
 
-    pushHistory({
-      player: 2,
-      action: 'tradeoff',
-      cards: sel.map(() => ({ card: null, to: 'discard' }))
-    });
-    await afterCommit(prevNext, token);
+      const ok = Game.performTradeoff(2, sel);
+      if (!ok) {
+        sendMatchSyncToGuest();
+        animating = false;
+        render();
+        return;
+      }
+      netSession?.send({ type: 'turn_commit', view: Game.buildPlayerView(2) });
+
+      await Promise.all(sel.map((_, k) => Fx.flyCard({
+        from: froms[k],
+        to,
+        frontSrc: null,
+        backSrc: CARD_BACK,
+        startFaceUp: false,
+        endFaceUp: false,
+        delay: k * 120
+      })));
+      if (token !== gameToken) return;
+
+      pushHistory({
+        player: 2,
+        action: 'tradeoff',
+        cards: sel.map(() => ({ card: null, to: 'discard' }))
+      });
+      await afterCommit(prevNext, token);
+    }
+  } catch (err) {
+    if (err?.abort || token !== gameToken) return;
+    console.error(err);
+    stopPeek(false);
+    Fx.clearFx();
+    pendingOffer = null;
+    animating = false;
+    render();
   }
 }
 
 async function handleOfferIntent(msg) {
   const token = gameToken;
-  const { kind, selected, cards } = msg;
-  const prevNext = Game.getHand(2);
+  const { kind, selected } = msg;
+  animating = true;
+  updateActionBar();
 
-  pendingOffer = {
-    kind,
-    offerer: 2,
-    cards,
-    revealed: false,
-    interactive: false,
-    chosen: null,
-    hidden: new Set(),
-    resolve: null
-  };
-  renderOfferTray();
+  try {
+    const hand2 = Game.getHand(2);
+    const expectedLen = kind === 'gift' ? 3 : kind === 'competition' ? 4 : 0;
+    if (
+      expectedLen === 0 ||
+      Game.state.gameOver ||
+      Game.state.currentPlayer !== 2 ||
+      !Game.canUseAction(2, kind) ||
+      !isValidRemoteSelection(hand2.length, selected, expectedLen)
+    ) {
+      sendMatchSyncToGuest();
+      animating = false;
+      render();
+      return;
+    }
 
-  const froms = selected.map((i) => Fx.rectOf(handEl(2, i)));
-  const tos = cards.map((_, k) => Fx.rectOf(els.offerTray.querySelector(`[data-slot="${k}"]`)));
-  selected.forEach((i) => { handEl(2, i).style.visibility = 'hidden'; });
+    const cards = selected.map((i) => hand2[i]);
+    const prevNext = Game.getHand(1);
 
-  const clones = await Promise.all(cards.map((card, k) => Fx.flyCard({
-    from: froms[k],
-    to: tos[k],
-    frontSrc: cardFront(card),
-    backSrc: CARD_BACK,
-    startFaceUp: false,
-    endFaceUp: true,
-    delay: k * 90,
-    keep: true
-  })));
-  if (token !== gameToken) return;
+    pendingOffer = {
+      kind,
+      offerer: 2,
+      cards,
+      revealed: false,
+      interactive: false,
+      chosen: null,
+      hidden: new Set(),
+      resolve: null
+    };
+    renderOfferTray();
 
-  pendingOffer.revealed = true;
-  renderOfferTray();
-  clones.forEach((c) => c.remove());
+    const froms = selected.map((i) => Fx.rectOf(handEl(2, i)));
+    const tos = cards.map((_, k) => Fx.rectOf(els.offerTray.querySelector(`[data-slot="${k}"]`)));
+    selected.forEach((i) => {
+      const el = handEl(2, i);
+      if (el) el.style.visibility = 'hidden';
+    });
 
-  const choice = await awaitHumanChoice();
-  if (token !== gameToken) return;
+    const clones = await Promise.all(cards.map((card, k) => Fx.flyCard({
+      from: froms[k],
+      to: tos[k],
+      frontSrc: cardFront(card),
+      backSrc: CARD_BACK,
+      startFaceUp: false,
+      endFaceUp: true,
+      delay: k * 90,
+      keep: true
+    })));
+    if (token !== gameToken) return;
 
-  netSession.send({ type: 'offer_choice', choice });
-  pendingOffer.chosen = choice;
-  renderOfferTray();
+    pendingOffer.revealed = true;
+    renderOfferTray();
+    clones.forEach((c) => c.remove());
 
-  await Fx.wait(250);
-  if (token !== gameToken) return;
+    const choice = await awaitHumanChoice();
+    if (token !== gameToken) return;
 
-  const assign = kind === 'gift'
-    ? cards.map((_, k) => (k === choice ? 1 : 2))
-    : cards.map((_, k) => (Math.floor(k / 2) === choice ? 1 : 2));
-  await distributeOffer(assign);
-  if (token !== gameToken) return;
+    netSession.send({ type: 'offer_choice', choice });
+    pendingOffer.chosen = choice;
+    renderOfferTray();
 
-  pendingOffer = null;
-  if (kind === 'gift') {
-    Game.performGift(2, selected, choice);
-  } else {
-    Game.performCompetition(2, selected, choice + 1);
+    await Fx.wait(250);
+    if (token !== gameToken) return;
+
+    const assign = kind === 'gift'
+      ? cards.map((_, k) => (k === choice ? 1 : 2))
+      : cards.map((_, k) => (Math.floor(k / 2) === choice ? 1 : 2));
+    await distributeOffer(assign);
+    if (token !== gameToken) return;
+
+    pendingOffer = null;
+    const ok = kind === 'gift'
+      ? Game.performGift(2, selected, choice)
+      : Game.performCompetition(2, selected, choice + 1);
+    if (!ok) {
+      sendMatchSyncToGuest();
+      animating = false;
+      render();
+      return;
+    }
+
+    netSession.send({ type: 'turn_commit', view: Game.buildPlayerView(2) });
+    pushHistory({
+      player: 2,
+      action: kind,
+      cards: cards.map((card, k) => ({ card, to: assign[k] }))
+    });
+    await afterCommit(prevNext, token);
+  } catch (err) {
+    if (err?.abort || token !== gameToken) return;
+    console.error(err);
+    stopPeek(false);
+    Fx.clearFx();
+    pendingOffer = null;
+    animating = false;
+    render();
   }
-
-  netSession.send({ type: 'turn_commit', view: Game.buildPlayerView(2) });
-  pushHistory({
-    player: 2,
-    action: kind,
-    cards: cards.map((card, k) => ({ card, to: assign[k] }))
-  });
-  await afterCommit(prevNext, token);
 }
 
 function handleNetMessage(msg) {
@@ -2332,6 +2511,8 @@ function handleNetMessage(msg) {
         });
         beginOnlineNextRound();
       }
+    } else if (Game.state.gameOver && resultReady && !localReadyNext) {
+      buildResultPanel();
     }
     return;
   }
@@ -2752,6 +2933,8 @@ async function beginOnlineNextRound() {
 function handleRestartClick() {
   if (gameStarted) {
     openConfirmModal();
+  } else if (gameMode === 'online' && netSession) {
+    handleLeaveOnline();
   } else {
     showModeSelection();
   }
@@ -2948,7 +3131,7 @@ export function startApp() {
 
   document.addEventListener('keydown', (e) => {
     if (isDisconnectModalOpen()) {
-      if (e.key === 'Escape' || e.key === 'Enter') {
+      if (e.key === 'Escape') {
         e.preventDefault();
         closeDisconnectModal();
         showModeSelection();

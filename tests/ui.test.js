@@ -110,4 +110,28 @@ test('ui.js wires peek state, default random starter, renamed AI diffs, and onli
   const resolveChoiceMatch = js.match(/function resolveOfferChoice\(choice\)\s*\{([\s\S]*?)\}/);
   assert.ok(resolveChoiceMatch, 'resolveOfferChoice function found');
   assert.ok(resolveChoiceMatch[1].includes("peekState !== 'closed'"), 'resolveOfferChoice must guard against peeking');
+
+  // Verify Guest renders masked opponent secret card (0 sentinel)
+  const oppZoneMatch = js.match(/function buildOpponentZone\(\)\s*\{([\s\S]*?)\n\}/);
+  assert.ok(oppZoneMatch, 'buildOpponentZone function found');
+  assert.ok(!oppZoneMatch[1].includes('oppSecret !== 0'), 'buildOpponentZone must not exclude masked 0 secretCard');
+
+  // Verify Host captures Game.getHand(1) as prevNext after Guest turns
+  const actionIntentMatch = js.match(/async function handleActionIntent\(msg\)\s*\{([\s\S]*?)\n\}/);
+  assert.ok(actionIntentMatch, 'handleActionIntent function found');
+  assert.ok(actionIntentMatch[1].includes('const prevNext = Game.getHand(1)'), 'handleActionIntent must snapshot Host hand (seat 1)');
+
+  const offerIntentMatch = js.match(/async function handleOfferIntent\(msg\)\s*\{([\s\S]*?)\n\}/);
+  assert.ok(offerIntentMatch, 'handleOfferIntent function found');
+  assert.ok(offerIntentMatch[1].includes('const prevNext = Game.getHand(1)'), 'handleOfferIntent must snapshot Host hand (seat 1)');
+
+  // Verify renderOfferTray syncs peek button visibility
+  const renderOfferMatch = js.match(/function renderOfferTray\(\)\s*\{([\s\S]*?)\n\}/);
+  assert.ok(renderOfferMatch, 'renderOfferTray function found');
+  assert.ok(renderOfferMatch[1].includes('updatePeekUI()'), 'renderOfferTray must call updatePeekUI()');
+
+  // Verify post-game restart in online mode notifies peer via handleLeaveOnline
+  const restartFnMatch = js.match(/function handleRestartClick\(\)\s*\{([\s\S]*?)\n\}/);
+  assert.ok(restartFnMatch, 'handleRestartClick function found');
+  assert.ok(restartFnMatch[1].includes('handleLeaveOnline()'), 'handleRestartClick must call handleLeaveOnline() when leaving online post-game');
 });

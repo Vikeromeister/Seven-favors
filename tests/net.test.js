@@ -339,7 +339,21 @@ test('onConnectionLost triggers on unexpected disconnect and supports reconnecti
 });
 
 test('Heartbeat pongTimeoutMs detects stale connection and invokes onConnectionLost', async () => {
-  const MockPeer = createMockPeerNetwork();
+  const BaseMockPeer = createMockPeerNetwork();
+  let dropGuestOutgoing = false;
+
+  class MutableMockPeer extends BaseMockPeer {
+    connect(targetId) {
+      const conn = super.connect(targetId);
+      const origSend = conn.send.bind(conn);
+      conn.send = (data) => {
+        if (!dropGuestOutgoing) {
+          origSend(data);
+        }
+      };
+      return conn;
+    }
+  }
 
   let lostReason = null;
   const hostSession = Net.createNetSession(
@@ -349,7 +363,7 @@ test('Heartbeat pongTimeoutMs detects stale connection and invokes onConnectionL
       }
     },
     {
-      PeerClass: MockPeer,
+      PeerClass: MutableMockPeer,
       pingIntervalMs: 20,
       pongTimeoutMs: 50
     }
@@ -357,18 +371,39 @@ test('Heartbeat pongTimeoutMs detects stale connection and invokes onConnectionL
 
   await hostSession.hostRoom('STALE1');
 
-  const guestSession = Net.createNetSession({}, { PeerClass: MockPeer });
+  const guestSession = Net.createNetSession({}, { PeerClass: MutableMockPeer });
   await guestSession.joinRoom('STALE1');
   await new Promise((r) => setTimeout(r, 20));
 
   assert.equal(hostSession.isConnected(), true);
 
   // Mute guest so it stops replying to pings (simulating stale connection)
-  // Wait > 60ms so pongTimeoutMs (50ms) expires
-  await new Promise((r) => setTimeout(r, 80));
+  dropGuestOutgoing = true;
+  await new Promise((r) => setTimeout(r, 120));
 
-  // Note: in mock peer send sends immediately, so if ping occurs it sends pong unless muted
-  // Let's close guest silently without notifying
+  assert.equal(lostReason, 'heartbeat_timeout');
+  assert.equal(hostSession.isConnected(), false);
+
   hostSession.close(false);
+  guestSession.close(false);
+});
+
+test('joinRoom rejects immediately with Room not found on peer-unavailable', async () => {
+  const MockPeer = createMockPeerNetwork();
+  const guestSession = Net.createNetSession(
+    {},
+    { PeerClass: MockPeer, connectTimeoutMs: 5000 }
+  );
+
+  const startedAt = Date.now();
+  await assert.rejects(
+    async () => {
+      await guestSession.joinRoom('NOPE99');
+    },
+    { message: 'Room not found. Check the 6-character code and ensure the host has the room open.' }
+  );
+  const elapsedMs = Date.now() - startedAt;
+  assert.ok(elapsedMs < 500, `Expected fast rejection on peer-unavailable, took ${elapsedMs}ms`);
+
   guestSession.close(false);
 });

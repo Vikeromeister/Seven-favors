@@ -177,11 +177,19 @@ export function createNetSession(handlers = {}, options = {}) {
     return new Promise((resolve, reject) => {
       let settled = false;
       const targetPeerId = peerIdForRoom(code);
-      const conn = p.connect(targetPeerId, { reliable: true, serialization: 'json' });
+
+      function detachPeerError() {
+        if (p.off) {
+          p.off('error', onPeerError);
+        } else {
+          p.removeListener?.('error', onPeerError);
+        }
+      }
 
       const timeout = setTimeout(() => {
         if (!settled) {
           settled = true;
+          detachPeerError();
           try { conn.close(); } catch (_) {}
           if (!isReconnect) {
             close(false);
@@ -195,6 +203,7 @@ export function createNetSession(handlers = {}, options = {}) {
         if (!settled) {
           settled = true;
           clearTimeout(timeout);
+          detachPeerError();
           try { conn.close(); } catch (_) {}
           if (!isReconnect) {
             close(false);
@@ -202,6 +211,15 @@ export function createNetSession(handlers = {}, options = {}) {
           reject(err);
         }
       }
+
+      const onPeerError = (err) => {
+        if (err && err.type === 'peer-unavailable') {
+          cleanupAndReject(new Error('Room not found. Check the 6-character code and ensure the host has the room open.'));
+        }
+      };
+      p.on('error', onPeerError);
+
+      const conn = p.connect(targetPeerId, { reliable: true, serialization: 'json' });
 
       const sendHello = () => {
         try {
@@ -220,6 +238,7 @@ export function createNetSession(handlers = {}, options = {}) {
           if (settled) return;
           settled = true;
           clearTimeout(timeout);
+          detachPeerError();
           activeConn = conn;
           peerLeftIntentionally = false;
           lastRxAt = Date.now();

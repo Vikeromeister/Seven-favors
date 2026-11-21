@@ -13,6 +13,7 @@ const INITIAL_DECK = [1, 1, 2, 2, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7
 
 export const state = {
   deck: [],
+  removedCard: null,
   round: 1,
   roundStarter: 1,
   currentPlayer: 1,
@@ -102,13 +103,14 @@ function resolveStarter(startingPlayer = 1) {
 }
 
 function dealRound(starter) {
-  state.deck = shuffle(INITIAL_DECK);
+  const shuffled = shuffle(INITIAL_DECK);
+  state.removedCard = shuffled[0];
   state.roundStarter = starter;
   state.currentPlayer = starter;
   state.turnsTaken = 0;
-  state.players[1].hand = state.deck.slice(0, 6);
-  state.players[2].hand = state.deck.slice(6, 12);
-  state.deck = state.deck.slice(12);
+  state.players[1].hand = shuffled.slice(1, 7);
+  state.players[2].hand = shuffled.slice(7, 13);
+  state.deck = shuffled.slice(13);
   sortHand(state.players[1].hand);
   sortHand(state.players[2].hand);
   state.players[1].actions = { secret: true, tradeoff: true, gift: true, competition: true };
@@ -208,7 +210,16 @@ function advanceTurn() {
 
 export function performSecret(player, cardIndex) {
   const hand = state.players[player]?.hand;
-  if (!hand || !state.players[player].actions.secret || cardIndex < 0 || cardIndex >= hand.length) {
+  if (
+    state.gameOver ||
+    player !== state.currentPlayer ||
+    !hand ||
+    !state.players[player].actions.secret ||
+    typeof cardIndex !== 'number' ||
+    !Number.isInteger(cardIndex) ||
+    cardIndex < 0 ||
+    cardIndex >= hand.length
+  ) {
     return false;
   }
   const card = hand.splice(cardIndex, 1)[0];
@@ -221,7 +232,13 @@ export function performSecret(player, cardIndex) {
 
 export function performTradeoff(player, cardIndexes) {
   const hand = state.players[player]?.hand;
-  if (!hand || !state.players[player].actions.tradeoff || !areValidUniqueIndices(cardIndexes, hand.length, 2)) {
+  if (
+    state.gameOver ||
+    player !== state.currentPlayer ||
+    !hand ||
+    !state.players[player].actions.tradeoff ||
+    !areValidUniqueIndices(cardIndexes, hand.length, 2)
+  ) {
     return false;
   }
   removeCardsFromHand(hand, cardIndexes);
@@ -233,13 +250,25 @@ export function performTradeoff(player, cardIndexes) {
 
 export function performGift(player, cardIndexes, chosenOfferIndex) {
   const hand = state.players[player]?.hand;
-  if (!hand || !state.players[player].actions.gift || !areValidUniqueIndices(cardIndexes, hand.length, 3)) {
+  if (
+    state.gameOver ||
+    player !== state.currentPlayer ||
+    !hand ||
+    !state.players[player].actions.gift ||
+    !areValidUniqueIndices(cardIndexes, hand.length, 3)
+  ) {
     return false;
   }
-  if (typeof chosenOfferIndex !== 'number' || chosenOfferIndex < 0 || chosenOfferIndex >= 3) {
+  if (
+    typeof chosenOfferIndex !== 'number' ||
+    !Number.isInteger(chosenOfferIndex) ||
+    chosenOfferIndex < 0 ||
+    chosenOfferIndex >= 3
+  ) {
     return false;
   }
-  const selected = removeCardsFromHand(hand, cardIndexes);
+  const selected = cardIndexes.map((idx) => hand[idx]);
+  removeCardsFromHand(hand, cardIndexes);
   const opponent = other(player);
   for (let i = 0; i < selected.length; i++) {
     if (i === chosenOfferIndex) {
@@ -256,7 +285,13 @@ export function performGift(player, cardIndexes, chosenOfferIndex) {
 
 export function performCompetition(player, cardIndexes, chosenPair) {
   const hand = state.players[player]?.hand;
-  if (!hand || !state.players[player].actions.competition || !areValidUniqueIndices(cardIndexes, hand.length, 4)) {
+  if (
+    state.gameOver ||
+    player !== state.currentPlayer ||
+    !hand ||
+    !state.players[player].actions.competition ||
+    !areValidUniqueIndices(cardIndexes, hand.length, 4)
+  ) {
     return false;
   }
   if (chosenPair !== 1 && chosenPair !== 2) {
@@ -417,6 +452,7 @@ export function buildPlayerView(viewerSeat) {
 export function applyPlayerView(view) {
   const seat = view.viewerSeat === 2 ? 2 : 1;
   const opp = other(seat);
+  state.removedCard = null;
   state.round = view.round;
   state.roundStarter = view.roundStarter;
   state.currentPlayer = view.currentPlayer;

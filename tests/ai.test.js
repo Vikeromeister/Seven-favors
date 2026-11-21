@@ -89,3 +89,23 @@ test('AI evaluates preserved geishalove carryover in Round 2', () => {
   const choiceR2 = AI.chooseAICompetitionResponse('hard', 2, Game.state, [7, 1], [4, 2]);
   assert.equal(choiceR2, 2);
 });
+
+test('AI does not peek at opponent hidden secretCard', () => {
+  Game.startGame(1);
+  Game.state.players[2].hand = [7, 6, 5, 4, 3, 2, 1];
+  Game.state.players[2].actions = { secret: false, tradeoff: false, gift: true, competition: true };
+  Game.state.geishagifts[1] = [0, 0, 0, 0, 1, 1, 2, 2];
+  Game.state.geishagifts[2] = [0, 0, 0, 0, 1, 1, 2, 2];
+  Game.state.secretCard = [null, null, 7];
+
+  const actionBase = AI.chooseAIAction('hard', 2, Game.state);
+  const giftBase = AI.chooseAIGiftResponse('hard', 2, Game.state, [6, 5, 4]);
+  const compBase = AI.chooseAICompetitionResponse('hard', 2, Game.state, [7, 1], [6, 4]);
+
+  for (const oppSecret of [1, 4, 5, 6, 7]) {
+    Game.state.secretCard[1] = oppSecret;
+    assert.deepEqual(AI.chooseAIAction('hard', 2, Game.state), actionBase);
+    assert.equal(AI.chooseAIGiftResponse('hard', 2, Game.state, [6, 5, 4]), giftBase);
+    assert.equal(AI.chooseAICompetitionResponse('hard', 2, Game.state, [7, 1], [6, 4]), compBase);
+  }
+});
